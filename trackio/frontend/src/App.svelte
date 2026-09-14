@@ -109,6 +109,8 @@
     spaces: false,
     allowed: true,
     auth: "local",
+    oidcEnabled: false,
+    user: null,
   });
   let mutationPollTimer = $state(null);
   let appBootstrapReady = $state(false);
@@ -346,9 +348,17 @@
         spaces: !!s.spaces,
         allowed: !!s.allowed,
         auth: s.auth ?? "none",
+        oidcEnabled: !!s.oidc_enabled,
+        user: s.user ?? null,
       };
     } catch {
-      mutationStatus = { spaces: false, allowed: true, auth: "local" };
+      mutationStatus = {
+        spaces: false,
+        allowed: true,
+        auth: "local",
+        oidcEnabled: false,
+        user: null,
+      };
     }
   }
 
@@ -584,6 +594,8 @@
       spacesMode={mutationStatus.spaces}
       runMutationAllowed={mutationStatus.allowed}
       mutationAuth={mutationStatus.auth}
+      oidcEnabled={mutationStatus.oidcEnabled}
+      authUser={mutationStatus.user}
       {readOnlySource}
       {projects}
       projectLocked={projectLocked}

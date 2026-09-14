@@ -41,6 +41,8 @@
     spacesMode = false,
     runMutationAllowed = true,
     mutationAuth = "local",
+    oidcEnabled = false,
+    authUser = null,
     readOnlySource = null,
     projectLocked = false,
     spaceId = null,
@@ -68,6 +70,11 @@
   let loginHref = $derived.by(() => {
     navTick;
     return `${window.location.origin}${window.__trackio_base || ""}/oauth/hf/start`;
+  });
+
+  let oidcLoginHref = $derived.by(() => {
+    navTick;
+    return `${window.location.origin}${window.__trackio_base || ""}/oauth/oidc/start`;
   });
 
 
@@ -572,6 +579,23 @@
           <p class="oauth-signed-in">Signed in with Hugging Face</p>
           <a class="oauth-logout" href={`${window.__trackio_base || ""}/oauth/logout`} onclick={() => { sessionStorage.removeItem("trackio_oauth_session"); }}>Logout</a>
         </div>
+      {:else if !spacesMode && (mutationAuth === "oidc" || mutationAuth === "oidc_insufficient")}
+        <div class="oauth-footer">
+          <p class="oauth-signed-in">Signed in as {authUser}</p>
+          {#if mutationAuth === "oidc_insufficient"}
+            <p class="oauth-line oauth-warn">
+              This account does not have write access to this server.
+            </p>
+          {/if}
+          <a class="oauth-logout" href={`${window.__trackio_base || ""}/oauth/logout`}>Logout</a>
+        </div>
+      {:else if !spacesMode && oidcEnabled && !runMutationAllowed}
+        <div class="oauth-footer">
+          <a class="oidc-login-btn" href={oidcLoginHref}>Sign in</a>
+          <p class="oauth-hint">
+            Sign in to log metrics, upload files, and manage runs.
+          </p>
+        </div>
       {/if}
   {/snippet}
 </SidebarShell>
@@ -644,6 +668,25 @@
     box-sizing: border-box;
   }
   .hf-login-btn:hover {
+    background: rgb(40, 48, 66);
+  }
+  .oidc-login-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    padding: 8px 12px;
+    font-size: 13px;
+    font-weight: 600;
+    color: white;
+    background: rgb(20, 28, 46);
+    border-radius: var(--radius-lg, 8px);
+    text-decoration: none;
+    border: none;
+    cursor: pointer;
+    box-sizing: border-box;
+  }
+  .oidc-login-btn:hover {
     background: rgb(40, 48, 66);
   }
   .hf-logo {

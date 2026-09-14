@@ -25,6 +25,7 @@ from starlette.responses import RedirectResponse
 from starlette.routing import Route
 
 import trackio.cas as cas
+import trackio.oidc as oidc
 import trackio.references as references
 import trackio.utils as utils
 from trackio.asgi_app import (
@@ -363,6 +364,7 @@ def oauth_logout(request: Request):
         samesite="none" if _on_spaces else "lax",
         secure=_on_spaces,
     )
+    oidc.clear_session_cookie(request, resp)
     return resp
 
 
@@ -454,16 +456,23 @@ def check_write_access(request: Request, token: str) -> bool:
     return False
 
 
+def _has_oidc_write_access(request: Request) -> bool:
+    session = oidc.get_oidc_session(request)
+    return session is not None and session.can_write
+
+
 def assert_can_write_metrics(request: Request, hf_token: str | None) -> None:
     if on_spaces():
         check_hf_token_has_write_access(hf_token)
     else:
         if check_write_access(request, write_token):
             return
+        if _has_oidc_write_access(request):
+            return
         raise TrackioAPIError(
             "A write_token is required to log metrics or upload to this server. "
             "Use the write-access URL from trackio.show(), set TRACKIO_WRITE_TOKEN, "
-            "or send header X-Trackio-Write-Token."
+            "send header X-Trackio-Write-Token, or sign in via OIDC with write access."
         )
 
 
@@ -471,10 +480,12 @@ def assert_can_stage_upload(request: Request) -> None:
     if not on_spaces():
         if check_write_access(request, write_token):
             return
+        if _has_oidc_write_access(request):
+            return
         raise TrackioAPIError(
             "A write_token is required to upload files to this server. "
             "Use the write-access URL from trackio.show(), set TRACKIO_WRITE_TOKEN, "
-            "or send header X-Trackio-Write-Token."
+            "send header X-Trackio-Write-Token, or sign in via OIDC with write access."
         )
 
     bearer_token = _authorization_bearer_token(request)
@@ -505,9 +516,12 @@ def assert_can_mutate_runs(request: Request) -> None:
     if not on_spaces():
         if check_write_access(request, write_token):
             return
+        if _has_oidc_write_access(request):
+            return
         raise TrackioAPIError(
             "A write_token is required to delete or rename runs. "
-            "Open the dashboard using the link that includes the write_token query parameter."
+            "Open the dashboard using the link that includes the write_token "
+            "query parameter, or sign in via OIDC with write access."
         )
     hf_tok = _hf_access_token(request)
     if hf_tok is not None:
@@ -526,9 +540,32 @@ def assert_can_mutate_runs(request: Request) -> None:
 
 def get_run_mutation_status(request: Request) -> dict[str, Any]:
     if not on_spaces():
+        session = oidc.get_oidc_session(request)
+        oidc_on = oidc.oidc_enabled()
+        user = session.display_name if session is not None else None
         if check_write_access(request, write_token):
-            return {"spaces": False, "allowed": True, "auth": "local"}
-        return {"spaces": False, "allowed": False, "auth": "none"}
+            return {
+                "spaces": False,
+                "allowed": True,
+                "auth": "local",
+                "oidc_enabled": oidc_on,
+                "user": user,
+            }
+        if session is not None:
+            return {
+                "spaces": False,
+                "allowed": session.can_write,
+                "auth": "oidc" if session.can_write else "oidc_insufficient",
+                "oidc_enabled": True,
+                "user": user,
+            }
+        return {
+            "spaces": False,
+            "allowed": False,
+            "auth": "none",
+            "oidc_enabled": oidc_on,
+            "user": None,
+        }
     hf_tok = _hf_access_token(request)
     if hf_tok is not None:
         try:
@@ -1430,6 +1467,7 @@ def build_starlette_app_only(
         Route(OAUTH_START_PATH, oauth_hf_start, methods=["GET"]),
         Route(OAUTH_CALLBACK_PATH, oauth_hf_callback, methods=["GET"]),
         Route("/oauth/logout", oauth_logout, methods=["GET"]),
+        *oidc.oidc_routes(),
     ]
     mcp_lifespan = None
     mcp_routes: list[Any] = []
@@ -1466,6 +1504,10 @@ def build_starlette_app_only(
     resolved_frontend = resolve_frontend_dir(frontend_dir)
     mount_frontend(starlette_app, frontend_dir=resolved_frontend.path)
     starlette_app.add_middleware(CompressionMiddleware)
+    starlette_app.add_middleware(
+        oidc.OidcAuthRequiredMiddleware,
+        write_token_checker=lambda req: check_write_access(req, write_token),
+    )
     start_inbox_poller()
     return starlette_app, write_token
 
