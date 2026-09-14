@@ -2,8 +2,11 @@
   import { onMount } from "svelte";
   import {
     adminCreateUser,
+    adminGetAuthSettings,
     adminResetPassword,
+    adminSetAuthSettings,
     adminSetRole,
+    adminTestOidc,
     getAdminUsers,
     revokeUserSessions,
   } from "../lib/api.js";
@@ -35,7 +38,10 @@
     }
   }
 
-  onMount(refresh);
+  onMount(() => {
+    refresh();
+    loadAuthSettings();
+  });
 
   async function revoke(sub) {
     revoking = sub;
@@ -65,6 +71,49 @@
   function currentRole(user) {
     if (user.role_override) return user.role_override;
     return "default";
+  }
+
+  let authSettings = $state(null);
+  let settingsSecret = $state("");
+  let settingsSaving = $state(false);
+  let settingsMessage = $state(null);
+  let testMessage = $state(null);
+
+  async function loadAuthSettings() {
+    try {
+      authSettings = await adminGetAuthSettings();
+      settingsSecret = "";
+    } catch {
+      authSettings = null;
+    }
+  }
+
+  async function saveAuthSettings(e) {
+    e.preventDefault();
+    settingsSaving = true;
+    settingsMessage = null;
+    try {
+      authSettings = await adminSetAuthSettings({
+        ...authSettings,
+        client_secret: settingsSecret,
+      });
+      settingsSecret = "";
+      settingsMessage = "Settings saved.";
+    } catch (err) {
+      settingsMessage = err?.message ?? String(err);
+    } finally {
+      settingsSaving = false;
+    }
+  }
+
+  async function testOidc() {
+    testMessage = "Testing…";
+    try {
+      const result = await adminTestOidc(authSettings?.issuer ?? "");
+      testMessage = `Discovery OK: ${result.authorization_endpoint}`;
+    } catch (err) {
+      testMessage = err?.message ?? String(err);
+    }
   }
 
   let newUsername = $state("");
@@ -137,6 +186,88 @@
   {:else if !isAdmin}
     <p class="error">Admin access is required to view this page.</p>
   {:else}
+    {#if authSettings}
+      <section>
+        <h3>Authentication settings</h3>
+        <p class="muted">
+          OIDC sign-in becomes available on the login page once enabled and
+          saved here. Saved settings take precedence over
+          <span class="mono">TRACKIO_OIDC_*</span> environment variables
+          {#if authSettings.source === "env"}(currently using environment
+          fallback){/if}.
+        </p>
+        <form class="settings-form" onsubmit={saveAuthSettings}>
+          <label class="toggle">
+            <input type="checkbox" bind:checked={authSettings.oidc_enabled} />
+            Enable OIDC sign-in
+            {#if authSettings.oidc_active}
+              <span class="badge badge-write">active</span>
+            {:else}
+              <span class="badge badge-read">inactive</span>
+            {/if}
+          </label>
+          <div class="settings-grid">
+            <label>Issuer URL
+              <input bind:value={authSettings.issuer} placeholder="https://idp.example.com/realms/main" />
+            </label>
+            <label>Client ID
+              <input bind:value={authSettings.client_id} />
+            </label>
+            <label>Client secret
+              <input
+                type="password"
+                bind:value={settingsSecret}
+                placeholder={authSettings.client_secret_set ? "(unchanged)" : ""}
+                autocomplete="new-password"
+              />
+            </label>
+            <label>Scopes
+              <input bind:value={authSettings.scopes} placeholder="openid profile email" />
+            </label>
+            <label>Groups claim
+              <input bind:value={authSettings.groups_claim} placeholder="groups" />
+            </label>
+            <label>Allowed users (comma-separated)
+              <input bind:value={authSettings.allowed_users} placeholder="empty = anyone at the IdP" />
+            </label>
+            <label>Allowed groups
+              <input bind:value={authSettings.allowed_groups} />
+            </label>
+            <label>Write users
+              <input bind:value={authSettings.write_users} placeholder="empty = all signed-in users, * = everyone" />
+            </label>
+            <label>Write groups
+              <input bind:value={authSettings.write_groups} />
+            </label>
+            <label>Admin users
+              <input bind:value={authSettings.admin_users} />
+            </label>
+            <label>Admin groups
+              <input bind:value={authSettings.admin_groups} />
+            </label>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" bind:checked={authSettings.auth_required} />
+            Require sign-in for the whole dashboard (write-token clients are
+            exempt)
+            {#if authSettings.auth_required_active && !authSettings.auth_required}
+              <span class="badge badge-read">forced on by env</span>
+            {/if}
+          </label>
+          <div class="settings-actions">
+            <button class="create-btn" type="submit" disabled={settingsSaving}>
+              {settingsSaving ? "Saving…" : "Save settings"}
+            </button>
+            <button class="secondary-btn" type="button" onclick={testOidc}>
+              Test discovery
+            </button>
+            {#if settingsMessage}<span class="muted">{settingsMessage}</span>{/if}
+            {#if testMessage}<span class="muted">{testMessage}</span>{/if}
+          </div>
+        </form>
+      </section>
+    {/if}
+
     <section>
       <h3>Users ({users.length})</h3>
       {#if users.length === 0}
@@ -440,6 +571,46 @@
   }
   .secondary-btn:hover {
     background: var(--background-fill-secondary, #f9fafb);
+  }
+  .settings-form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-top: 8px;
+  }
+  .settings-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 10px 16px;
+  }
+  .settings-grid label,
+  .toggle {
+    font-size: 12px;
+    color: var(--body-text-color-subdued, #6b7280);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .toggle {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--body-text-color, #1f2937);
+  }
+  .settings-grid input {
+    padding: 6px 10px;
+    font-size: 13px;
+    border: 1px solid var(--border-color-primary, #e5e7eb);
+    border-radius: 6px;
+    background: var(--background-fill-primary, white);
+    color: var(--body-text-color, #1f2937);
+  }
+  .settings-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
   }
   .create-form {
     display: flex;

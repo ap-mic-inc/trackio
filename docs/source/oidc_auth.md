@@ -17,27 +17,23 @@ A fresh server needs no configuration to get an administrator:
 
 Local accounts are stored in `TRACKIO_DIR/auth/auth.db` with scrypt-hashed passwords. The `/login` page also shows a "Sign in with OIDC" button whenever OIDC is configured, so both kinds of users share one entry point. The setup page is disabled when `TRACKIO_OIDC_ADMIN_USERS`/`TRACKIO_OIDC_ADMIN_GROUPS` are configured (the environment already defines the admins).
 
-## Enable OIDC login
+## Enable OIDC login (from the Admin page)
 
-Register a **confidential client** at your identity provider with the redirect URI:
+OIDC sign-in is unavailable until an admin configures it. Register a **confidential client** at your identity provider with the redirect URI:
 
 ```
 https://your-trackio-host/oauth/oidc/callback
 ```
 
-Then set these environment variables on the server before launching `trackio show`:
+Then, signed in as an admin, open the **Admin tab → Authentication settings**, tick *Enable OIDC sign-in*, and fill in the issuer URL, client ID, and client secret (plus optional scopes, groups claim, and the allowed/write/admin lists described below). **Test discovery** verifies connectivity to the provider; **Save settings** applies immediately — the "Sign in with OIDC" button appears on the `/login` page.
 
-```bash
-export TRACKIO_OIDC_ISSUER="https://idp.example.com/realms/main"
-export TRACKIO_OIDC_CLIENT_ID="trackio"
-export TRACKIO_OIDC_CLIENT_SECRET="..."
-```
+Settings are stored in `TRACKIO_DIR/auth/auth.db`. The provider's endpoints are discovered automatically from `{issuer}/.well-known/openid-configuration`, and the login flow uses the authorization code flow with PKCE. Sessions last 30 days and are also persisted, so they survive server restarts.
 
-The provider's endpoints are discovered automatically from `{issuer}/.well-known/openid-configuration`. The login flow uses the authorization code flow with PKCE. A "Sign in" button appears in the dashboard sidebar; sessions last 30 days and are persisted in `TRACKIO_DIR/auth/auth.db`, so they survive server restarts.
+Environment variables (`TRACKIO_OIDC_ISSUER`, `TRACKIO_OIDC_CLIENT_ID`, `TRACKIO_OIDC_CLIENT_SECRET`, and the permission lists below) still work as a **fallback for servers that have never saved settings from the UI** — convenient for fully env-driven container deployments. Once settings are saved from the Admin page, they take precedence and the environment values are ignored.
 
 ## Permissions
 
-Two levels exist: **read** (view dashboards) and **write** (log metrics, upload files, delete or rename runs).
+Two levels exist: **read** (view dashboards) and **write** (log metrics, upload files, delete or rename runs). The fields below appear in the Admin page's Authentication settings; the environment variable of the same name applies only in fallback mode.
 
 | Variable | Meaning |
 |---|---|
@@ -47,7 +43,6 @@ Two levels exist: **read** (view dashboards) and **write** (log metrics, upload 
 | `TRACKIO_OIDC_WRITE_GROUPS` | Groups granted write access. |
 | `TRACKIO_OIDC_ADMIN_USERS` | Emails/usernames/subs granted admin access (see [Admin page](#admin-page)). Admins always have write access and may sign in even when not in the allowed lists. |
 | `TRACKIO_OIDC_ADMIN_GROUPS` | Groups granted admin access. |
-| `TRACKIO_OIDC_FIRST_USER_ADMIN` | Opt-in (`1`): promote the first OIDC sign-in to admin when no admin exists anywhere. Default off — the first admin is registered on the `/setup` page instead. |
 | `TRACKIO_OIDC_GROUPS_CLAIM` | Claim that holds the user's groups (default `groups`). |
 | `TRACKIO_OIDC_SCOPES` | Requested scopes (default `openid profile email`). |
 
@@ -68,13 +63,13 @@ export TRACKIO_OIDC_WRITE_GROUPS="ml-admins"
 
 ## Require sign-in for everything
 
-By default only writes are protected and dashboards stay publicly viewable. To put the whole dashboard (all pages and read APIs) behind sign-in:
+By default only writes are protected and dashboards stay publicly viewable. To put the whole dashboard (all pages and read APIs) behind sign-in, tick **"Require sign-in for the whole dashboard"** in the Admin page's Authentication settings, or set the environment variable:
 
 ```bash
 export TRACKIO_AUTH_REQUIRED=1
 ```
 
-Browser requests without a session are redirected to the sign-in flow; API requests receive `401`. Requests that carry a valid write token (`X-Trackio-Write-Token` header, cookie, or `?write_token=` query parameter) bypass the gate, so training scripts continue to work unchanged.
+Either source enables the gate (the env var cannot be turned off from the UI). Browser requests without a session are redirected to `/login`; API requests receive `401`. Requests that carry a valid write token (`X-Trackio-Write-Token` header, cookie, or `?write_token=` query parameter) bypass the gate, so training scripts continue to work unchanged.
 
 ## Admin page
 
@@ -88,7 +83,6 @@ Admins see an **Admin** tab in the dashboard navbar showing:
 Who is an admin:
 
 - **The account registered on the first-run `/setup` page** (see [Local accounts](#local-accounts--first-run-setup)).
-- Optionally, the first user to sign in via OIDC, when `TRACKIO_OIDC_FIRST_USER_ADMIN=1` is set and no admin exists anywhere.
 - Users/groups listed in `TRACKIO_OIDC_ADMIN_USERS` / `TRACKIO_OIDC_ADMIN_GROUPS`.
 - Anyone assigned the admin role from the Admin page (see below).
 - Anyone with the server write token (the write-access URL from `trackio.show()`), so the server owner always has access even before OIDC is configured.

@@ -4,7 +4,9 @@ Enables login against any OpenID Connect provider (Keycloak, Authentik,
 Google, Entra ID, ...) via the authorization code flow with PKCE, and maps
 authenticated users to read/write permissions.
 
-Configuration (environment variables):
+Configuration comes from the Admin page (stored in the auth database and
+taking precedence) or, for servers that never saved settings from the UI,
+from the environment variables below:
 
 - TRACKIO_OIDC_ISSUER: issuer URL; enables OIDC when set. Discovery document
   is fetched from ``{issuer}/.well-known/openid-configuration``.
@@ -20,14 +22,12 @@ Configuration (environment variables):
 - TRACKIO_OIDC_ADMIN_USERS / TRACKIO_OIDC_ADMIN_GROUPS: users/groups granted
   admin access (the Admin page in the dashboard). Admins always have write
   access. Anyone with the server write token is also an admin.
-- TRACKIO_OIDC_FIRST_USER_ADMIN: opt-in (set 1): when no admin is configured
-  or stored, the first user to sign in via OIDC is promoted to admin. The
-  default first-run flow is the /setup page (see trackio.local_auth), which
-  registers a password-based admin account. Admins can also assign roles
-  from the Admin page; those stored overrides take precedence over the
-  environment lists.
 - TRACKIO_OIDC_GROUPS_CLAIM: claim holding the user's groups (default:
   ``groups``).
+
+The first admin is registered on the /setup page (see trackio.local_auth).
+Admins can also assign per-user roles from the Admin page; those stored
+overrides take precedence over the configured lists.
 - TRACKIO_AUTH_REQUIRED: when truthy, every dashboard/API request requires a
   signed-in OIDC session (requests carrying a valid write token are exempt so
   training scripts keep working).
@@ -93,16 +93,45 @@ class OidcConfig:
     admin_users: frozenset[str]
     admin_groups: frozenset[str]
     groups_claim: str
-    auth_required: bool
     cookie_secure: bool | None
-    first_user_admin: bool
 
     @property
     def write_open_to_all(self) -> bool:
         return not self.write_users and not self.write_groups
 
 
-def load_oidc_config() -> OidcConfig | None:
+AUTH_SETTINGS_KEY = "auth"
+
+
+def _cookie_secure_env() -> bool | None:
+    value = os.environ.get("TRACKIO_OIDC_COOKIE_SECURE")
+    return None if value is None else _truthy(value)
+
+
+def _config_from_settings(settings: dict[str, Any]) -> OidcConfig | None:
+    if not settings.get("oidc_enabled"):
+        return None
+    issuer = str(settings.get("issuer") or "").strip().rstrip("/")
+    client_id = str(settings.get("client_id") or "").strip()
+    if not issuer or not client_id:
+        return None
+    return OidcConfig(
+        issuer=issuer,
+        client_id=client_id,
+        client_secret=str(settings.get("client_secret") or "").strip(),
+        scopes=str(settings.get("scopes") or "openid profile email").strip(),
+        allowed_users=_csv_set(settings.get("allowed_users")),
+        allowed_groups=_csv_set(settings.get("allowed_groups")),
+        write_users=_csv_set(settings.get("write_users")),
+        write_groups=_csv_set(settings.get("write_groups")),
+        admin_users=_csv_set(settings.get("admin_users")),
+        admin_groups=_csv_set(settings.get("admin_groups")),
+        groups_claim=str(settings.get("groups_claim") or "groups").strip(),
+        cookie_secure=_cookie_secure_env(),
+    )
+
+
+def _config_from_env() -> OidcConfig | None:
     issuer = (os.environ.get("TRACKIO_OIDC_ISSUER") or "").strip().rstrip("/")
     if not issuer:
         return None
@@ -113,7 +142,6 @@ def load_oidc_config() -> OidcConfig | None:
             "OIDC login is disabled."
         )
         return None
-    cookie_secure_env = os.environ.get("TRACKIO_OIDC_COOKIE_SECURE")
     return OidcConfig(
         issuer=issuer,
         client_id=client_id,
@@ -128,12 +156,21 @@ def load_oidc_config() -> OidcConfig | None:
         admin_users=_csv_set(os.environ.get("TRACKIO_OIDC_ADMIN_USERS")),
         admin_groups=_csv_set(os.environ.get("TRACKIO_OIDC_ADMIN_GROUPS")),
         groups_claim=(os.environ.get("TRACKIO_OIDC_GROUPS_CLAIM") or "groups").strip(),
-        auth_required=_truthy(os.environ.get("TRACKIO_AUTH_REQUIRED")),
-        cookie_secure=(
-            None if cookie_secure_env is None else _truthy(cookie_secure_env)
-        ),
-        first_user_admin=_truthy(os.environ.get("TRACKIO_OIDC_FIRST_USER_ADMIN", "0")),
+        cookie_secure=_cookie_secure_env(),
     )
+
+
+def load_oidc_config() -> OidcConfig | None:
+    """Resolve the OIDC configuration.
+
+    Settings saved from the Admin page (stored in the auth database) take
+    precedence; environment variables act only as a fallback for servers
+    that have never saved settings from the UI.
+    """
+    settings = auth_store.get_setting(AUTH_SETTINGS_KEY)
+    if isinstance(settings, dict):
+        return _config_from_settings(settings)
+    return _config_from_env()
 
 
 def oidc_enabled() -> bool:
@@ -142,8 +179,12 @@ def oidc_enabled() -> bool:
 
 def auth_required() -> bool:
     """Whether the whole dashboard requires a signed-in session. Independent
-    of OIDC configuration, since password-based local sign-in always works."""
-    return _truthy(os.environ.get("TRACKIO_AUTH_REQUIRED"))
+    of OIDC configuration, since password-based local sign-in always works.
+    Enabled by the Admin-page setting or the TRACKIO_AUTH_REQUIRED env var."""
+    if _truthy(os.environ.get("TRACKIO_AUTH_REQUIRED")):
+        return True
+    settings = auth_store.get_setting(AUTH_SETTINGS_KEY)
+    return bool(isinstance(settings, dict) and settings.get("auth_required"))
 
 
 @dataclass
@@ -282,14 +323,12 @@ def apply_role_override(
 
 def resolve_login_permissions(
     config: OidcConfig, claims: dict[str, Any]
-) -> tuple[bool, bool, bool, bool]:
-    """Return (allowed, can_write, is_admin, bootstrapped) for a sign-in.
+) -> tuple[bool, bool, bool]:
+    """Return (allowed, can_write, is_admin) for a sign-in.
 
-    Combines the environment-based evaluation with any role override stored
-    by an admin (an override also allows sign-in, since the user was
-    explicitly managed). When no admin is configured anywhere, the first
-    user to sign in is promoted to admin unless
-    TRACKIO_OIDC_FIRST_USER_ADMIN=0.
+    Combines the configured evaluation with any role override stored by an
+    admin (an override also allows sign-in, since the user was explicitly
+    managed).
     """
     allowed, can_write, is_admin = evaluate_permissions(config, claims)
 
@@ -297,21 +336,12 @@ def resolve_login_permissions(
     override = auth_store.get_role_override(sub) if isinstance(sub, str) else None
     if override in ROLE_OVERRIDES:
         can_write, is_admin = apply_role_override(can_write, is_admin, override)
-        return True, can_write, is_admin, False
+        return True, can_write, is_admin
 
     if not allowed:
-        return False, False, False, False
+        return False, False, False
 
-    if (
-        config.first_user_admin
-        and not is_admin
-        and not config.admin_users
-        and not config.admin_groups
-        and not auth_store.has_admin()
-    ):
-        return True, True, True, True
-
-    return True, can_write, is_admin, False
+    return True, can_write, is_admin
 
 
 def refresh_user_permissions(sub: str) -> dict[str, bool] | None:
@@ -540,9 +570,7 @@ def oidc_callback(request: Request) -> Response:
     if not isinstance(sub, str) or not sub:
         return RedirectResponse(url=err, status_code=302)
 
-    allowed, can_write, is_admin, bootstrapped = resolve_login_permissions(
-        config, claims
-    )
+    allowed, can_write, is_admin = resolve_login_permissions(config, claims)
     if not allowed:
         logger.warning("OIDC sign-in denied for sub=%s", sub)
         return RedirectResponse(
@@ -569,13 +597,6 @@ def oidc_callback(request: Request) -> Response:
         can_write=session.can_write,
         is_admin=session.is_admin,
     )
-    if bootstrapped:
-        auth_store.set_role_override(session.sub, "admin")
-        logger.warning(
-            "First OIDC user %s was promoted to admin (disable with "
-            "TRACKIO_OIDC_FIRST_USER_ADMIN=0).",
-            session.display_name,
-        )
     resp = RedirectResponse(url=f"{_root_path(request)}/", status_code=302)
     set_session_cookie(request, resp, session_id)
     return resp

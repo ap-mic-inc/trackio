@@ -28,6 +28,9 @@ _ACTIVITY_THROTTLE_SECONDS = 60.0
 _lock = threading.Lock()
 _last_activity_write: dict[tuple[str, str, str], float] = {}
 
+_SETTINGS_CACHE_TTL = 5.0
+_settings_cache: dict[str, tuple[Any, float]] = {}
+
 
 def _db_path() -> Path:
     return utils.TRACKIO_DIR / "auth" / "auth.db"
@@ -69,6 +72,14 @@ def _connect() -> sqlite3.Connection:
     )
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS actor_projects (
             actor TEXT NOT NULL,
             project TEXT NOT NULL,
@@ -85,6 +96,45 @@ def _connect() -> sqlite3.Connection:
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def get_setting(key: str) -> Any | None:
+    """Read a JSON settings value. Results are cached briefly, since this is
+    called on the request path (auth gate, config resolution)."""
+    now = time.monotonic()
+    with _lock:
+        cached = _settings_cache.get(key)
+        if cached is not None and now - cached[1] < _SETTINGS_CACHE_TTL:
+            return cached[0]
+    value: Any | None = None
+    try:
+        with _lock, _connect() as conn:
+            row = conn.execute(
+                "SELECT value FROM settings WHERE key = ?", (key,)
+            ).fetchone()
+            if row is not None:
+                value = json.loads(row[0])
+    except (sqlite3.Error, ValueError) as e:
+        logger.warning("failed to read setting %s: %s", key, e)
+        return None
+    with _lock:
+        _settings_cache[key] = (value, now)
+    return value
+
+
+def set_setting(key: str, value: Any) -> None:
+    try:
+        with _lock, _connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO settings (key, value) VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value=excluded.value
+                """,
+                (key, json.dumps(value)),
+            )
+            _settings_cache.pop(key, None)
+    except sqlite3.Error as e:
+        logger.warning("failed to write setting %s: %s", key, e)
 
 
 def record_login(

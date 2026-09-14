@@ -295,6 +295,18 @@ export async function adminResetPassword(sub, password) {
   return await callApi("/admin_reset_password", { sub, password });
 }
 
+export async function adminGetAuthSettings() {
+  return await callApi("/admin_get_auth_settings", {});
+}
+
+export async function adminSetAuthSettings(settings) {
+  return await callApi("/admin_set_auth_settings", { settings });
+}
+
+export async function adminTestOidc(issuer) {
+  return await callApi("/admin_test_oidc", { issuer });
+}
+
 export async function deleteRun(project, run) {
   const params = { project, ...normalizeRun(run) };
   if (await isStaticMode()) return staticApi.deleteRun(project, run);

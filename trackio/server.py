@@ -1476,6 +1476,91 @@ def admin_reset_password(request: Request, sub: str, password: str) -> dict[str,
     return {"sub": sub, "reset": True}
 
 
+_AUTH_SETTINGS_STRING_FIELDS = (
+    "issuer",
+    "client_id",
+    "scopes",
+    "groups_claim",
+    "allowed_users",
+    "allowed_groups",
+    "write_users",
+    "write_groups",
+    "admin_users",
+    "admin_groups",
+)
+
+
+def _auth_settings_payload() -> dict[str, Any]:
+    stored = auth_store.get_setting(oidc.AUTH_SETTINGS_KEY)
+    settings = stored if isinstance(stored, dict) else {}
+    payload: dict[str, Any] = {
+        field: str(settings.get(field) or "") for field in _AUTH_SETTINGS_STRING_FIELDS
+    }
+    payload["oidc_enabled"] = bool(settings.get("oidc_enabled"))
+    payload["auth_required"] = bool(settings.get("auth_required"))
+    payload["client_secret_set"] = bool(settings.get("client_secret"))
+    payload["source"] = "db" if isinstance(stored, dict) else "env"
+    payload["oidc_active"] = oidc.oidc_enabled()
+    payload["auth_required_active"] = oidc.auth_required()
+    return payload
+
+
+def admin_get_auth_settings(request: Request) -> dict[str, Any]:
+    """Current OIDC/security settings (the client secret itself is never
+    returned). Admin only."""
+    assert_is_admin(request)
+    return _auth_settings_payload()
+
+
+def admin_set_auth_settings(
+    request: Request, settings: dict[str, Any]
+) -> dict[str, Any]:
+    """Save OIDC/security settings from the Admin page. Saved settings take
+    precedence over environment variables. An empty client_secret keeps the
+    previously stored secret. Admin only."""
+    assert_is_admin(request)
+    if not isinstance(settings, dict):
+        raise TrackioAPIError("settings must be an object")
+    stored = auth_store.get_setting(oidc.AUTH_SETTINGS_KEY)
+    current = stored if isinstance(stored, dict) else {}
+    new: dict[str, Any] = {
+        field: str(settings.get(field) or "").strip()
+        for field in _AUTH_SETTINGS_STRING_FIELDS
+    }
+    secret = str(settings.get("client_secret") or "")
+    new["client_secret"] = secret if secret else str(current.get("client_secret") or "")
+    new["oidc_enabled"] = bool(settings.get("oidc_enabled"))
+    new["auth_required"] = bool(settings.get("auth_required"))
+    if new["oidc_enabled"] and (not new["issuer"] or not new["client_id"]):
+        raise TrackioAPIError(
+            "Enabling OIDC requires both an issuer URL and a client ID."
+        )
+    auth_store.set_setting(oidc.AUTH_SETTINGS_KEY, new)
+    return _auth_settings_payload()
+
+
+def admin_test_oidc(request: Request, issuer: str | None = None) -> dict[str, Any]:
+    """Fetch the OIDC discovery document for the given (or configured)
+    issuer to verify connectivity. Admin only."""
+    assert_is_admin(request)
+    issuer = (issuer or "").strip().rstrip("/")
+    if not issuer:
+        config = oidc.load_oidc_config()
+        if config is None:
+            raise TrackioAPIError("No issuer provided and OIDC is not configured.")
+        issuer = config.issuer
+    try:
+        doc = oidc._discover(issuer)
+    except Exception as e:
+        raise TrackioAPIError(f"Discovery failed for {issuer!r}: {e}") from e
+    return {
+        "issuer": issuer,
+        "authorization_endpoint": doc.get("authorization_endpoint"),
+        "token_endpoint": doc.get("token_endpoint"),
+        "userinfo_endpoint": doc.get("userinfo_endpoint"),
+    }
+
+
 def admin_set_role(request: Request, sub: str, role: str) -> dict[str, Any]:
     """Assign a role override to a user: admin, write, read, or default
     (fall back to the environment-configured permissions). Takes effect
@@ -1559,6 +1644,9 @@ def _api_registry() -> dict[str, Any]:
         "admin_set_role": admin_set_role,
         "admin_create_user": admin_create_user,
         "admin_reset_password": admin_reset_password,
+        "admin_get_auth_settings": admin_get_auth_settings,
+        "admin_set_auth_settings": admin_set_auth_settings,
+        "admin_test_oidc": admin_test_oidc,
     }
 
 

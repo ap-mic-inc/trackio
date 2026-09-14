@@ -21,8 +21,10 @@ def clean_state(monkeypatch, tmp_path):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setattr("trackio.utils.TRACKIO_DIR", tmp_path)
     oidc._sessions.clear()
+    auth_store._settings_cache.clear()
     yield
     oidc._sessions.clear()
+    auth_store._settings_cache.clear()
 
 
 def _client() -> TestClient:
