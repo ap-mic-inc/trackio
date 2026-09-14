@@ -1,6 +1,6 @@
 <script>
   import { onMount } from "svelte";
-  import { getAdminUsers, revokeUserSessions } from "../lib/api.js";
+  import { adminSetRole, getAdminUsers, revokeUserSessions } from "../lib/api.js";
 
   let { isAdmin = false } = $props();
 
@@ -47,6 +47,20 @@
     expandedSub = expandedSub === sub ? null : sub;
   }
 
+  async function changeRole(sub, role) {
+    try {
+      await adminSetRole(sub, role);
+      await refresh();
+    } catch (e) {
+      error = e?.message ?? String(e);
+    }
+  }
+
+  function currentRole(user) {
+    if (user.role_override) return user.role_override;
+    return "default";
+  }
+
   function displayName(user) {
     return user.name || user.username || user.email || user.sub;
   }
@@ -83,7 +97,11 @@
     <section>
       <h3>Signed-in users ({users.length})</h3>
       {#if users.length === 0}
-        <p class="muted">No one has signed in via OIDC yet.</p>
+        <p class="muted">
+          No one has signed in via OIDC yet. Unless disabled or an admin is
+          configured via environment variables, the first user to sign in
+          becomes an admin.
+        </p>
       {:else}
         <table class="admin-table">
           <thead>
@@ -91,6 +109,7 @@
               <th>User</th>
               <th>Email</th>
               <th>Access</th>
+              <th>Role</th>
               <th>Last login</th>
               <th>Logins</th>
               <th>Sessions</th>
@@ -111,6 +130,19 @@
                   {:else}
                     <span class="badge badge-read">read-only</span>
                   {/if}
+                </td>
+                <td>
+                  <select
+                    class="role-select"
+                    value={currentRole(user)}
+                    onclick={(e) => e.stopPropagation()}
+                    onchange={(e) => changeRole(user.sub, e.target.value)}
+                  >
+                    <option value="default">default (env)</option>
+                    <option value="admin">admin</option>
+                    <option value="write">write</option>
+                    <option value="read">read-only</option>
+                  </select>
                 </td>
                 <td class="muted">{user.last_login ?? "—"}</td>
                 <td class="muted">{user.login_count}</td>
@@ -133,7 +165,7 @@
               </tr>
               {#if expandedSub === user.sub}
                 <tr class="detail-row">
-                  <td colspan="8">
+                  <td colspan="9">
                     <div class="detail">
                       <p class="muted mono">sub: {user.sub}</p>
                       {#if user.groups?.length}
@@ -207,9 +239,10 @@
 
     <p class="hint">
       Activity timestamps are UTC. High-frequency logging is aggregated (one
-      count per minute per project). Permissions are configured via
-      <span class="mono">TRACKIO_OIDC_*</span> environment variables on the
-      server.
+      count per minute per project). The Role column overrides the
+      <span class="mono">TRACKIO_OIDC_*</span> environment defaults and takes
+      effect immediately, including for active sessions; "default (env)"
+      falls back to the environment configuration.
     </p>
   {/if}
 </div>
@@ -295,6 +328,15 @@
   .badge-read {
     background: var(--background-fill-secondary, #f3f4f6);
     color: var(--body-text-color-subdued, #6b7280);
+  }
+  .role-select {
+    padding: 3px 6px;
+    font-size: 12px;
+    border: 1px solid var(--border-color-primary, #e5e7eb);
+    border-radius: 6px;
+    background: var(--background-fill-primary, white);
+    color: var(--body-text-color, #1f2937);
+    cursor: pointer;
   }
   .revoke-btn {
     padding: 4px 10px;

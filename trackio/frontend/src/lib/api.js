@@ -283,6 +283,10 @@ export async function revokeUserSessions(sub) {
   return await callApi("/admin_revoke_user_sessions", { sub });
 }
 
+export async function adminSetRole(sub, role) {
+  return await callApi("/admin_set_role", { sub, role });
+}
+
 export async function deleteRun(project, run) {
   const params = { project, ...normalizeRun(run) };
   if (await isStaticMode()) return staticApi.deleteRun(project, run);

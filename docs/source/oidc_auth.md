@@ -32,6 +32,7 @@ Two levels exist: **read** (view dashboards) and **write** (log metrics, upload 
 | `TRACKIO_OIDC_WRITE_GROUPS` | Groups granted write access. |
 | `TRACKIO_OIDC_ADMIN_USERS` | Emails/usernames/subs granted admin access (see [Admin page](#admin-page)). Admins always have write access and may sign in even when not in the allowed lists. |
 | `TRACKIO_OIDC_ADMIN_GROUPS` | Groups granted admin access. |
+| `TRACKIO_OIDC_FIRST_USER_ADMIN` | Promote the first sign-in to admin when no admin exists anywhere (default `1`). |
 | `TRACKIO_OIDC_GROUPS_CLAIM` | Claim that holds the user's groups (default `groups`). |
 | `TRACKIO_OIDC_SCOPES` | Requested scopes (default `openid profile email`). |
 
@@ -71,10 +72,16 @@ Admins see an **Admin** tab in the dashboard navbar showing:
 
 Who is an admin:
 
+- **The first user to sign in.** When no admin is configured via environment variables and none has been stored yet, the first OIDC sign-in is automatically promoted to admin — so a fresh server bootstraps itself without any permission configuration. Disable with `TRACKIO_OIDC_FIRST_USER_ADMIN=0` (recommended for servers exposed before you sign in).
 - Users/groups listed in `TRACKIO_OIDC_ADMIN_USERS` / `TRACKIO_OIDC_ADMIN_GROUPS`.
+- Anyone assigned the admin role from the Admin page (see below).
 - Anyone with the server write token (the write-access URL from `trackio.show()`), so the server owner always has access even before OIDC is configured.
 
-All of this data lives in `TRACKIO_DIR/auth/auth.db` and survives restarts. The underlying APIs are `admin_get_users` and `admin_revoke_user_sessions`.
+## Managing roles from the UI
+
+Each user row on the Admin page has a **Role** selector: `default (env)`, `admin`, `write`, or `read-only`. A selected role is stored in the database and overrides the environment-based permissions for that user; `default (env)` falls back to the `TRACKIO_OIDC_*` lists. Changes take effect immediately, including for the user's active sessions — demoting someone to read-only blocks their next write. A stored role also lets the user sign in even when they are not in the allowed lists.
+
+All of this data lives in `TRACKIO_DIR/auth/auth.db` and survives restarts. The underlying APIs are `admin_get_users`, `admin_set_role`, and `admin_revoke_user_sessions`.
 
 ## Other options
 

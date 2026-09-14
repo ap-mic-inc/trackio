@@ -490,3 +490,139 @@ def test_jwt_claims_decoding():
     claims = oidc._decode_jwt_claims(token)
     assert claims == {"sub": "abc", "email": "a@b.c"}
     assert oidc._decode_jwt_claims("garbage") == {}
+
+
+def test_apply_role_override():
+    assert oidc.apply_role_override(False, False, "admin") == (True, True)
+    assert oidc.apply_role_override(False, False, "write") == (True, False)
+    assert oidc.apply_role_override(True, True, "read") == (False, False)
+    assert oidc.apply_role_override(True, False, None) == (True, False)
+
+
+def test_first_user_becomes_admin(monkeypatch):
+    config = _configure(monkeypatch, TRACKIO_OIDC_WRITE_USERS="somebody@b.c")
+    claims = {"sub": "first-user", "email": "first@b.c"}
+    allowed, can_write, is_admin, bootstrapped = oidc.resolve_login_permissions(
+        config, claims
+    )
+    assert allowed and can_write and is_admin and bootstrapped
+
+    auth_store.record_login("first-user", "first@b.c", None, None, (), True, True)
+    auth_store.set_role_override("first-user", "admin")
+
+    second = {"sub": "second-user", "email": "second@b.c"}
+    allowed, can_write, is_admin, bootstrapped = oidc.resolve_login_permissions(
+        config, second
+    )
+    assert allowed and not can_write and not is_admin and not bootstrapped
+
+    allowed, can_write, is_admin, bootstrapped = oidc.resolve_login_permissions(
+        config, claims
+    )
+    assert allowed and can_write and is_admin and not bootstrapped
+
+
+def test_no_bootstrap_when_env_admins_configured(monkeypatch):
+    config = _configure(monkeypatch, TRACKIO_OIDC_ADMIN_USERS="boss@b.c")
+    _, _, is_admin, bootstrapped = oidc.resolve_login_permissions(
+        config, {"sub": "s", "email": "random@b.c"}
+    )
+    assert not is_admin and not bootstrapped
+
+
+def test_no_bootstrap_when_disabled(monkeypatch):
+    config = _configure(monkeypatch, TRACKIO_OIDC_FIRST_USER_ADMIN="0")
+    _, _, is_admin, bootstrapped = oidc.resolve_login_permissions(
+        config, {"sub": "s", "email": "random@b.c"}
+    )
+    assert not is_admin and not bootstrapped
+
+
+def test_no_bootstrap_for_disallowed_user(monkeypatch):
+    config = _configure(monkeypatch, TRACKIO_OIDC_ALLOWED_USERS="member@b.c")
+    allowed, _, _, bootstrapped = oidc.resolve_login_permissions(
+        config, {"sub": "s", "email": "random@b.c"}
+    )
+    assert not allowed and not bootstrapped
+
+
+def test_role_override_wins_over_env(monkeypatch):
+    config = _configure(monkeypatch, TRACKIO_OIDC_WRITE_USERS="writer@b.c")
+    auth_store.set_role_override("demoted", None)
+    auth_store.set_role_override("promoted", "admin")
+    auth_store.set_role_override("readonly", "read")
+
+    allowed, can_write, is_admin, _ = oidc.resolve_login_permissions(
+        config, {"sub": "promoted", "email": "nobody@b.c"}
+    )
+    assert allowed and can_write and is_admin
+
+    allowed, can_write, _, _ = oidc.resolve_login_permissions(
+        config, {"sub": "readonly", "email": "writer@b.c"}
+    )
+    assert allowed and not can_write
+
+
+def test_override_allows_signin_despite_allowed_list(monkeypatch):
+    config = _configure(monkeypatch, TRACKIO_OIDC_ALLOWED_USERS="member@b.c")
+    auth_store.set_role_override("outsider", "write")
+    allowed, can_write, _, _ = oidc.resolve_login_permissions(
+        config, {"sub": "outsider", "email": "outsider@b.c"}
+    )
+    assert allowed and can_write
+
+
+def test_refresh_user_permissions_updates_live_sessions(monkeypatch):
+    _configure(monkeypatch)
+    auth_store.record_login("user-1", "a@b.c", "Alice", "alice", (), True, False)
+    session_id = _install_session(can_write=True, is_admin=False)
+
+    auth_store.set_role_override("user-1", "read")
+    permissions = oidc.refresh_user_permissions("user-1")
+    assert permissions == {"can_write": False, "is_admin": False}
+    assert oidc._sessions[session_id].can_write is False
+
+    auth_store.set_role_override("user-1", "admin")
+    permissions = oidc.refresh_user_permissions("user-1")
+    assert permissions == {"can_write": True, "is_admin": True}
+    assert oidc._sessions[session_id].is_admin is True
+
+    assert oidc.refresh_user_permissions("ghost") is None
+
+
+def test_admin_set_role_endpoint(monkeypatch):
+    from trackio import server
+    from trackio.exceptions import TrackioAPIError
+
+    _configure(monkeypatch)
+    auth_store.record_login("user-v", "v@b.c", "Viewer", "v", (), False, False)
+    viewer_id = _install_session(
+        session_id="viewer", can_write=False, sub="user-v", name="Viewer"
+    )
+    admin_id = _install_session(
+        session_id="adm", is_admin=True, sub="user-a", name="Root"
+    )
+    request = _mock_request_with_cookie(f"trackio_oidc_session={admin_id}")
+    request.query_params = {}
+
+    result = server.admin_set_role(request, "user-v", "admin")
+    assert result["is_admin"] is True
+    assert oidc._sessions[viewer_id].is_admin is True
+
+    result = server.admin_set_role(request, "user-v", "read")
+    assert result["can_write"] is False
+    assert oidc._sessions[viewer_id].can_write is False
+
+    result = server.admin_set_role(request, "user-v", "default")
+    users = {u["sub"]: u for u in auth_store.list_users()}
+    assert users["user-v"]["role_override"] is None
+
+    with pytest.raises(TrackioAPIError):
+        server.admin_set_role(request, "user-v", "superuser")
+    with pytest.raises(TrackioAPIError):
+        server.admin_set_role(request, "ghost", "admin")
+
+    viewer_request = _mock_request_with_cookie(f"trackio_oidc_session={viewer_id}")
+    viewer_request.query_params = {}
+    with pytest.raises(TrackioAPIError):
+        server.admin_set_role(viewer_request, "user-v", "admin")

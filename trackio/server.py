@@ -1443,6 +1443,20 @@ def admin_revoke_user_sessions(request: Request, sub: str) -> dict[str, Any]:
     return {"revoked": oidc.revoke_sessions_for_sub(sub)}
 
 
+def admin_set_role(request: Request, sub: str, role: str) -> dict[str, Any]:
+    """Assign a role override to a user: admin, write, read, or default
+    (fall back to the environment-configured permissions). Takes effect
+    immediately, including for the user's active sessions. Admin only."""
+    assert_is_admin(request)
+    if role not in (*oidc.ROLE_OVERRIDES, "default"):
+        raise TrackioAPIError("role must be one of: admin, write, read, default")
+    if auth_store.get_user(sub) is None:
+        raise TrackioAPIError(f"Unknown user: {sub!r}")
+    auth_store.set_role_override(sub, None if role == "default" else role)
+    permissions = oidc.refresh_user_permissions(sub)
+    return {"sub": sub, "role": role, **(permissions or {})}
+
+
 def force_sync() -> bool:
     try:
         import_inbox_once()
@@ -1509,6 +1523,7 @@ def _api_registry() -> dict[str, Any]:
         "force_sync": force_sync,
         "admin_get_users": admin_get_users,
         "admin_revoke_user_sessions": admin_revoke_user_sessions,
+        "admin_set_role": admin_set_role,
     }
 
 

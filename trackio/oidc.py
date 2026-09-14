@@ -20,6 +20,10 @@ Configuration (environment variables):
 - TRACKIO_OIDC_ADMIN_USERS / TRACKIO_OIDC_ADMIN_GROUPS: users/groups granted
   admin access (the Admin page in the dashboard). Admins always have write
   access. Anyone with the server write token is also an admin.
+- TRACKIO_OIDC_FIRST_USER_ADMIN: when no admin is configured or stored, the
+  first user to sign in is promoted to admin (default on; set 0 to disable).
+  Admins can also assign roles from the Admin page; those stored overrides
+  take precedence over the environment lists.
 - TRACKIO_OIDC_GROUPS_CLAIM: claim holding the user's groups (default:
   ``groups``).
 - TRACKIO_AUTH_REQUIRED: when truthy, every dashboard/API request requires a
@@ -89,6 +93,7 @@ class OidcConfig:
     groups_claim: str
     auth_required: bool
     cookie_secure: bool | None
+    first_user_admin: bool
 
     @property
     def write_open_to_all(self) -> bool:
@@ -125,6 +130,7 @@ def load_oidc_config() -> OidcConfig | None:
         cookie_secure=(
             None if cookie_secure_env is None else _truthy(cookie_secure_env)
         ),
+        first_user_admin=_truthy(os.environ.get("TRACKIO_OIDC_FIRST_USER_ADMIN", "1")),
     )
 
 
@@ -253,6 +259,86 @@ def evaluate_permissions(
         or bool(groups & config.write_groups)
     )
     return True, can_write, is_admin
+
+
+ROLE_OVERRIDES = ("admin", "write", "read")
+
+
+def apply_role_override(
+    can_write: bool, is_admin: bool, override: str | None
+) -> tuple[bool, bool]:
+    """Map a stored role override onto (can_write, is_admin)."""
+    if override == "admin":
+        return True, True
+    if override == "write":
+        return True, False
+    if override == "read":
+        return False, False
+    return can_write, is_admin
+
+
+def resolve_login_permissions(
+    config: OidcConfig, claims: dict[str, Any]
+) -> tuple[bool, bool, bool, bool]:
+    """Return (allowed, can_write, is_admin, bootstrapped) for a sign-in.
+
+    Combines the environment-based evaluation with any role override stored
+    by an admin (an override also allows sign-in, since the user was
+    explicitly managed). When no admin is configured anywhere, the first
+    user to sign in is promoted to admin unless
+    TRACKIO_OIDC_FIRST_USER_ADMIN=0.
+    """
+    allowed, can_write, is_admin = evaluate_permissions(config, claims)
+
+    sub = claims.get("sub")
+    override = auth_store.get_role_override(sub) if isinstance(sub, str) else None
+    if override in ROLE_OVERRIDES:
+        can_write, is_admin = apply_role_override(can_write, is_admin, override)
+        return True, can_write, is_admin, False
+
+    if not allowed:
+        return False, False, False, False
+
+    if (
+        config.first_user_admin
+        and not is_admin
+        and not config.admin_users
+        and not config.admin_groups
+        and not auth_store.has_admin()
+    ):
+        return True, True, True, True
+
+    return True, can_write, is_admin, False
+
+
+def refresh_user_permissions(sub: str) -> dict[str, bool] | None:
+    """Recompute a user's permissions from the current configuration and
+    stored role override, then apply them to the users table and any live
+    sessions. Returns the new permissions, or None if the user is unknown."""
+    user = auth_store.get_user(sub)
+    if user is None:
+        return None
+    config = load_oidc_config()
+    if config is not None:
+        claims = {
+            "sub": sub,
+            "email": user["email"],
+            "preferred_username": user["username"],
+            config.groups_claim: list(user["groups"]),
+        }
+        _, can_write, is_admin = evaluate_permissions(config, claims)
+    else:
+        can_write = is_admin = False
+    can_write, is_admin = apply_role_override(
+        can_write, is_admin, user["role_override"]
+    )
+    auth_store.update_user_permissions(sub, can_write, is_admin)
+    with _lock:
+        for session in _sessions.values():
+            if session.sub == sub:
+                session.can_write = can_write
+                session.is_admin = is_admin
+    return {"can_write": can_write, "is_admin": is_admin}
 
 
 def _root_path(request: Request) -> str:
@@ -439,7 +525,9 @@ def oidc_callback(request: Request) -> Response:
     if not isinstance(sub, str) or not sub:
         return RedirectResponse(url=err, status_code=302)
 
-    allowed, can_write, is_admin = evaluate_permissions(config, claims)
+    allowed, can_write, is_admin, bootstrapped = resolve_login_permissions(
+        config, claims
+    )
     if not allowed:
         logger.warning("OIDC sign-in denied for sub=%s", sub)
         return RedirectResponse(
@@ -468,6 +556,13 @@ def oidc_callback(request: Request) -> Response:
         can_write=session.can_write,
         is_admin=session.is_admin,
     )
+    if bootstrapped:
+        auth_store.set_role_override(session.sub, "admin")
+        logger.warning(
+            "First OIDC user %s was promoted to admin (disable with "
+            "TRACKIO_OIDC_FIRST_USER_ADMIN=0).",
+            session.display_name,
+        )
     auth_store.persist_session(session_id, session.sub)
 
     resp = RedirectResponse(url=f"{_root_path(request)}/", status_code=302)

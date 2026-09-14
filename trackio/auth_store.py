@@ -53,6 +53,9 @@ def _connect() -> sqlite3.Connection:
         )
         """
     )
+    columns = [row[1] for row in conn.execute("PRAGMA table_info(users)")]
+    if "role_override" not in columns:
+        conn.execute("ALTER TABLE users ADD COLUMN role_override TEXT")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS sessions (
@@ -125,6 +128,80 @@ def record_login(
             )
     except sqlite3.Error as e:
         logger.warning("failed to record login for %s: %s", sub, e)
+
+
+def get_user(sub: str) -> dict[str, Any] | None:
+    try:
+        with _lock, _connect() as conn:
+            row = conn.execute(
+                """
+                SELECT sub, email, name, username, groups_json, can_write,
+                       is_admin, role_override
+                FROM users WHERE sub = ?
+                """,
+                (sub,),
+            ).fetchone()
+    except sqlite3.Error as e:
+        logger.warning("failed to get user %s: %s", sub, e)
+        return None
+    if row is None:
+        return None
+    return {
+        "sub": row[0],
+        "email": row[1],
+        "name": row[2],
+        "username": row[3],
+        "groups": tuple(json.loads(row[4] or "[]")),
+        "can_write": bool(row[5]),
+        "is_admin": bool(row[6]),
+        "role_override": row[7],
+    }
+
+
+def get_role_override(sub: str) -> str | None:
+    user = get_user(sub)
+    return user["role_override"] if user else None
+
+
+def set_role_override(sub: str, role: str | None) -> None:
+    """Store a role override for ``sub``, creating a stub user row when the
+    user has not signed in yet."""
+    try:
+        with _lock, _connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO users (sub, role_override) VALUES (?, ?)
+                ON CONFLICT(sub) DO UPDATE SET role_override=excluded.role_override
+                """,
+                (sub, role),
+            )
+    except sqlite3.Error as e:
+        logger.warning("failed to set role override for %s: %s", sub, e)
+
+
+def update_user_permissions(sub: str, can_write: bool, is_admin: bool) -> None:
+    try:
+        with _lock, _connect() as conn:
+            conn.execute(
+                "UPDATE users SET can_write = ?, is_admin = ? WHERE sub = ?",
+                (int(can_write), int(is_admin), sub),
+            )
+    except sqlite3.Error as e:
+        logger.warning("failed to update permissions for %s: %s", sub, e)
+
+
+def has_admin() -> bool:
+    """Whether any known user is an admin (via login evaluation or a stored
+    role override)."""
+    try:
+        with _lock, _connect() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM users WHERE is_admin = 1 OR role_override = 'admin' LIMIT 1"
+            ).fetchone()
+            return row is not None
+    except sqlite3.Error as e:
+        logger.warning("failed to check for admins: %s", e)
+        return False
 
 
 def persist_session(session_id: str, sub: str) -> None:
@@ -228,7 +305,8 @@ def list_users() -> list[dict[str, Any]]:
             user_rows = conn.execute(
                 """
                 SELECT sub, email, name, username, groups_json, can_write,
-                       is_admin, first_login, last_login, login_count
+                       is_admin, first_login, last_login, login_count,
+                       role_override
                 FROM users ORDER BY last_login DESC
                 """
             ).fetchall()
@@ -281,6 +359,7 @@ def list_users() -> list[dict[str, Any]]:
                 "first_login": row[7],
                 "last_login": row[8],
                 "login_count": row[9],
+                "role_override": row[10],
                 "active_sessions": session_counts.get(sub, 0),
                 "projects": sorted(
                     projects_by_actor.get(sub, {}).values(),
