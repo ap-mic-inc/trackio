@@ -56,6 +56,8 @@ def _connect() -> sqlite3.Connection:
     columns = [row[1] for row in conn.execute("PRAGMA table_info(users)")]
     if "role_override" not in columns:
         conn.execute("ALTER TABLE users ADD COLUMN role_override TEXT")
+    if "password_hash" not in columns:
+        conn.execute("ALTER TABLE users ADD COLUMN password_hash TEXT")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS sessions (
@@ -161,6 +163,78 @@ def get_user(sub: str) -> dict[str, Any] | None:
 def get_role_override(sub: str) -> str | None:
     user = get_user(sub)
     return user["role_override"] if user else None
+
+
+LOCAL_SUB_PREFIX = "local:"
+
+
+def is_local_sub(sub: str) -> bool:
+    return sub.startswith(LOCAL_SUB_PREFIX)
+
+
+def create_local_user(
+    username: str,
+    password_hash: str,
+    role: str,
+    can_write: bool,
+    is_admin: bool,
+) -> str | None:
+    """Create a password-based local account. Returns the new sub, or None
+    when the username is already taken."""
+    sub = f"{LOCAL_SUB_PREFIX}{username}"
+    now = _now_iso()
+    try:
+        with _lock, _connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO users (
+                    sub, username, name, groups_json, can_write, is_admin,
+                    role_override, password_hash, first_login, login_count
+                )
+                VALUES (?, ?, ?, '[]', ?, ?, ?, ?, ?, 0)
+                """,
+                (
+                    sub,
+                    username,
+                    username,
+                    int(can_write),
+                    int(is_admin),
+                    role,
+                    password_hash,
+                    now,
+                ),
+            )
+    except sqlite3.IntegrityError:
+        return None
+    except sqlite3.Error as e:
+        logger.warning("failed to create local user %s: %s", username, e)
+        return None
+    return sub
+
+
+def get_password_hash(sub: str) -> str | None:
+    try:
+        with _lock, _connect() as conn:
+            row = conn.execute(
+                "SELECT password_hash FROM users WHERE sub = ?", (sub,)
+            ).fetchone()
+            return row[0] if row else None
+    except sqlite3.Error as e:
+        logger.warning("failed to get password hash for %s: %s", sub, e)
+        return None
+
+
+def set_password_hash(sub: str, password_hash: str) -> bool:
+    try:
+        with _lock, _connect() as conn:
+            cursor = conn.execute(
+                "UPDATE users SET password_hash = ? WHERE sub = ?",
+                (password_hash, sub),
+            )
+            return cursor.rowcount > 0
+    except sqlite3.Error as e:
+        logger.warning("failed to set password hash for %s: %s", sub, e)
+        return False
 
 
 def set_role_override(sub: str, role: str | None) -> None:
@@ -360,6 +434,7 @@ def list_users() -> list[dict[str, Any]]:
                 "last_login": row[8],
                 "login_count": row[9],
                 "role_override": row[10],
+                "auth_type": "local" if is_local_sub(sub) else "oidc",
                 "active_sessions": session_counts.get(sub, 0),
                 "projects": sorted(
                     projects_by_actor.get(sub, {}).values(),

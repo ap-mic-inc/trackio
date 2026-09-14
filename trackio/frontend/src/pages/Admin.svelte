@@ -1,6 +1,12 @@
 <script>
   import { onMount } from "svelte";
-  import { adminSetRole, getAdminUsers, revokeUserSessions } from "../lib/api.js";
+  import {
+    adminCreateUser,
+    adminResetPassword,
+    adminSetRole,
+    getAdminUsers,
+    revokeUserSessions,
+  } from "../lib/api.js";
 
   let { isAdmin = false } = $props();
 
@@ -61,6 +67,43 @@
     return "default";
   }
 
+  let newUsername = $state("");
+  let newPassword = $state("");
+  let newRole = $state("write");
+  let creating = $state(false);
+  let createMessage = $state(null);
+
+  async function createUser(e) {
+    e.preventDefault();
+    creating = true;
+    createMessage = null;
+    try {
+      await adminCreateUser(newUsername, newPassword, newRole);
+      createMessage = `Created local account "${newUsername}".`;
+      newUsername = "";
+      newPassword = "";
+      newRole = "write";
+      await refresh();
+    } catch (err) {
+      createMessage = err?.message ?? String(err);
+    } finally {
+      creating = false;
+    }
+  }
+
+  async function resetPassword(sub) {
+    const password = window.prompt(
+      "New password (min 8 characters) for " + sub.replace("local:", "") + ":",
+    );
+    if (!password) return;
+    try {
+      await adminResetPassword(sub, password);
+      error = null;
+    } catch (err) {
+      error = err?.message ?? String(err);
+    }
+  }
+
   function displayName(user) {
     return user.name || user.username || user.email || user.sub;
   }
@@ -95,12 +138,11 @@
     <p class="error">Admin access is required to view this page.</p>
   {:else}
     <section>
-      <h3>Signed-in users ({users.length})</h3>
+      <h3>Users ({users.length})</h3>
       {#if users.length === 0}
         <p class="muted">
-          No one has signed in via OIDC yet. Unless disabled or an admin is
-          configured via environment variables, the first user to sign in
-          becomes an admin.
+          No users yet. The first admin account is registered on the
+          <span class="mono">/setup</span> page.
         </p>
       {:else}
         <table class="admin-table">
@@ -120,7 +162,12 @@
           <tbody>
             {#each users as user (user.sub)}
               <tr class="user-row" onclick={() => toggleExpand(user.sub)}>
-                <td class="name-cell">{displayName(user)}</td>
+                <td class="name-cell">
+                  {displayName(user)}
+                  {#if user.auth_type === "local"}
+                    <span class="badge badge-type">local</span>
+                  {/if}
+                </td>
                 <td class="muted">{user.email ?? "—"}</td>
                 <td>
                   {#if user.is_admin}
@@ -148,7 +195,18 @@
                 <td class="muted">{user.login_count}</td>
                 <td class="muted">{user.active_sessions}</td>
                 <td class="muted">{user.projects.length}</td>
-                <td>
+                <td class="actions-cell">
+                  {#if user.auth_type === "local"}
+                    <button
+                      class="secondary-btn"
+                      onclick={(e) => {
+                        e.stopPropagation();
+                        resetPassword(user.sub);
+                      }}
+                    >
+                      Reset password
+                    </button>
+                  {/if}
                   {#if user.active_sessions > 0}
                     <button
                       class="revoke-btn"
@@ -202,6 +260,39 @@
             {/each}
           </tbody>
         </table>
+      {/if}
+    </section>
+
+    <section>
+      <h3>Create local account</h3>
+      <p class="muted">
+        Password-based account managed by this server (independent of the
+        OIDC provider). The user signs in on the
+        <span class="mono">/login</span> page.
+      </p>
+      <form class="create-form" onsubmit={createUser}>
+        <input
+          placeholder="username"
+          bind:value={newUsername}
+          autocomplete="off"
+        />
+        <input
+          placeholder="password (min 8 chars)"
+          type="password"
+          bind:value={newPassword}
+          autocomplete="new-password"
+        />
+        <select class="role-select" bind:value={newRole}>
+          <option value="admin">admin</option>
+          <option value="write">write</option>
+          <option value="read">read-only</option>
+        </select>
+        <button class="create-btn" type="submit" disabled={creating}>
+          {creating ? "Creating…" : "Create user"}
+        </button>
+      </form>
+      {#if createMessage}
+        <p class="muted">{createMessage}</p>
       {/if}
     </section>
 
@@ -328,6 +419,58 @@
   .badge-read {
     background: var(--background-fill-secondary, #f3f4f6);
     color: var(--body-text-color-subdued, #6b7280);
+  }
+  .badge-type {
+    background: #e0f2fe;
+    color: #0369a1;
+    margin-left: 6px;
+  }
+  .actions-cell {
+    white-space: nowrap;
+  }
+  .secondary-btn {
+    padding: 4px 10px;
+    margin-right: 6px;
+    font-size: 12px;
+    border: 1px solid var(--border-color-primary, #e5e7eb);
+    border-radius: 6px;
+    background: var(--background-fill-primary, white);
+    color: var(--body-text-color, #374151);
+    cursor: pointer;
+  }
+  .secondary-btn:hover {
+    background: var(--background-fill-secondary, #f9fafb);
+  }
+  .create-form {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-top: 8px;
+    flex-wrap: wrap;
+  }
+  .create-form input {
+    padding: 6px 10px;
+    font-size: 13px;
+    border: 1px solid var(--border-color-primary, #e5e7eb);
+    border-radius: 6px;
+    background: var(--background-fill-primary, white);
+    color: var(--body-text-color, #1f2937);
+  }
+  .create-btn {
+    padding: 6px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    color: white;
+    background: rgb(20, 28, 46);
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .create-btn:hover:not(:disabled) {
+    background: rgb(40, 48, 66);
+  }
+  .create-btn:disabled {
+    opacity: 0.6;
   }
   .role-select {
     padding: 3px 6px;

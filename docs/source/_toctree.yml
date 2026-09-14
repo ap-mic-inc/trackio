@@ -24,7 +24,7 @@
   - local: self_hosted_server
     title: Self-host the Server
   - local: oidc_auth
-    title: OIDC Authentication
+    title: Authentication & Admin
   - local: deploy_embed
     title: Deploy and Embed Dashboards
   - local: manage

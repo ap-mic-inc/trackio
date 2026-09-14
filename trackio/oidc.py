@@ -20,10 +20,12 @@ Configuration (environment variables):
 - TRACKIO_OIDC_ADMIN_USERS / TRACKIO_OIDC_ADMIN_GROUPS: users/groups granted
   admin access (the Admin page in the dashboard). Admins always have write
   access. Anyone with the server write token is also an admin.
-- TRACKIO_OIDC_FIRST_USER_ADMIN: when no admin is configured or stored, the
-  first user to sign in is promoted to admin (default on; set 0 to disable).
-  Admins can also assign roles from the Admin page; those stored overrides
-  take precedence over the environment lists.
+- TRACKIO_OIDC_FIRST_USER_ADMIN: opt-in (set 1): when no admin is configured
+  or stored, the first user to sign in via OIDC is promoted to admin. The
+  default first-run flow is the /setup page (see trackio.local_auth), which
+  registers a password-based admin account. Admins can also assign roles
+  from the Admin page; those stored overrides take precedence over the
+  environment lists.
 - TRACKIO_OIDC_GROUPS_CLAIM: claim holding the user's groups (default:
   ``groups``).
 - TRACKIO_AUTH_REQUIRED: when truthy, every dashboard/API request requires a
@@ -130,7 +132,7 @@ def load_oidc_config() -> OidcConfig | None:
         cookie_secure=(
             None if cookie_secure_env is None else _truthy(cookie_secure_env)
         ),
-        first_user_admin=_truthy(os.environ.get("TRACKIO_OIDC_FIRST_USER_ADMIN", "1")),
+        first_user_admin=_truthy(os.environ.get("TRACKIO_OIDC_FIRST_USER_ADMIN", "0")),
     )
 
 
@@ -139,8 +141,9 @@ def oidc_enabled() -> bool:
 
 
 def auth_required() -> bool:
-    config = load_oidc_config()
-    return bool(config and config.auth_required)
+    """Whether the whole dashboard requires a signed-in session. Independent
+    of OIDC configuration, since password-based local sign-in always works."""
+    return _truthy(os.environ.get("TRACKIO_AUTH_REQUIRED"))
 
 
 @dataclass
@@ -352,8 +355,20 @@ def _callback_uri(request: Request) -> str:
     return str(request.base_url).rstrip("/") + OIDC_CALLBACK_PATH
 
 
-def _cookie_secure(request: Request, config: OidcConfig) -> bool:
-    if config.cookie_secure is not None:
+def install_session(session: OidcSession) -> str:
+    """Register a signed-in session (OIDC or local) in memory and in the
+    persistent session store, returning the new session id."""
+    session_id = secrets.token_urlsafe(32)
+    with _lock:
+        _sessions[session_id] = session
+    auth_store.persist_session(session_id, session.sub)
+    return session_id
+
+
+def cookie_secure(request: Request) -> bool:
+    """Whether the session cookie should carry the Secure flag."""
+    config = load_oidc_config()
+    if config is not None and config.cookie_secure is not None:
         return config.cookie_secure
     proto = request.headers.get("x-forwarded-proto") or request.url.scheme
     return proto.split(",")[0].strip() == "https"
@@ -543,9 +558,7 @@ def oidc_callback(request: Request) -> Response:
         can_write=can_write,
         is_admin=is_admin,
     )
-    session_id = secrets.token_urlsafe(32)
-    with _lock:
-        _sessions[session_id] = session
+    session_id = install_session(session)
     _evict_expired()
     auth_store.record_login(
         sub=session.sub,
@@ -563,9 +576,12 @@ def oidc_callback(request: Request) -> Response:
             "TRACKIO_OIDC_FIRST_USER_ADMIN=0).",
             session.display_name,
         )
-    auth_store.persist_session(session_id, session.sub)
-
     resp = RedirectResponse(url=f"{_root_path(request)}/", status_code=302)
+    set_session_cookie(request, resp, session_id)
+    return resp
+
+
+def set_session_cookie(request: Request, resp: Response, session_id: str) -> None:
     resp.set_cookie(
         key=OIDC_SESSION_COOKIE,
         value=session_id,
@@ -573,20 +589,17 @@ def oidc_callback(request: Request) -> Response:
         samesite="lax",
         max_age=_SESSION_TTL,
         path="/",
-        secure=_cookie_secure(request, config),
+        secure=cookie_secure(request),
     )
-    return resp
 
 
 def clear_session_cookie(request: Request, resp: Response) -> None:
     drop_session(request)
-    config = load_oidc_config()
-    secure = _cookie_secure(request, config) if config else False
     resp.delete_cookie(
         OIDC_SESSION_COOKIE,
         path="/",
         samesite="lax",
-        secure=secure,
+        secure=cookie_secure(request),
     )
 
 
@@ -603,7 +616,9 @@ _AUTH_EXEMPT_PATHS = frozenset(
         OIDC_CALLBACK_PATH,
         "/oauth/logout",
         "/oauth/hf/start",
+        "/login",
         "/login/callback",
+        "/setup",
         "/version",
     }
 )
@@ -639,11 +654,9 @@ class OidcAuthRequiredMiddleware:
             return
         if path.startswith("/api/") or path.startswith("/gradio_api/"):
             resp: Response = JSONResponse(
-                {"error": "Authentication required. Sign in via OIDC."},
+                {"error": "Authentication required. Sign in at /login."},
                 status_code=401,
             )
         else:
-            resp = RedirectResponse(
-                url=f"{root_path}{OIDC_START_PATH}", status_code=302
-            )
+            resp = RedirectResponse(url=f"{root_path}/login", status_code=302)
         await resp(scope, receive, send)

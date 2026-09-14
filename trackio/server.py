@@ -26,6 +26,7 @@ from starlette.routing import Route
 
 import trackio.auth_store as auth_store
 import trackio.cas as cas
+import trackio.local_auth as local_auth
 import trackio.oidc as oidc
 import trackio.references as references
 import trackio.utils as utils
@@ -581,6 +582,7 @@ def get_run_mutation_status(request: Request) -> dict[str, Any]:
                 "allowed": True,
                 "auth": "local",
                 "oidc_enabled": oidc_on,
+                "login_enabled": True,
                 "user": user,
                 "admin": True,
             }
@@ -589,7 +591,8 @@ def get_run_mutation_status(request: Request) -> dict[str, Any]:
                 "spaces": False,
                 "allowed": session.can_write,
                 "auth": "oidc" if session.can_write else "oidc_insufficient",
-                "oidc_enabled": True,
+                "oidc_enabled": oidc_on,
+                "login_enabled": True,
                 "user": user,
                 "admin": admin,
             }
@@ -598,6 +601,8 @@ def get_run_mutation_status(request: Request) -> dict[str, Any]:
             "allowed": False,
             "auth": "none",
             "oidc_enabled": oidc_on,
+            "login_enabled": True,
+            "setup_available": local_auth.setup_available(),
             "user": None,
             "admin": False,
         }
@@ -1443,6 +1448,34 @@ def admin_revoke_user_sessions(request: Request, sub: str) -> dict[str, Any]:
     return {"revoked": oidc.revoke_sessions_for_sub(sub)}
 
 
+def admin_create_user(
+    request: Request, username: str, password: str, role: str = "write"
+) -> dict[str, Any]:
+    """Create a password-based local account with the given role. Admin
+    only."""
+    assert_is_admin(request)
+    sub, error = local_auth.create_local_account(username, password, role)
+    if error:
+        raise TrackioAPIError(error)
+    return {"sub": sub, "username": username, "role": role}
+
+
+def admin_reset_password(request: Request, sub: str, password: str) -> dict[str, Any]:
+    """Reset a local account's password. Admin only."""
+    assert_is_admin(request)
+    if not auth_store.is_local_sub(sub):
+        raise TrackioAPIError(
+            "Passwords can only be reset for local accounts, not OIDC users."
+        )
+    if len(password or "") < local_auth.MIN_PASSWORD_LENGTH:
+        raise TrackioAPIError(
+            f"Password must be at least {local_auth.MIN_PASSWORD_LENGTH} characters."
+        )
+    if not auth_store.set_password_hash(sub, local_auth.hash_password(password)):
+        raise TrackioAPIError(f"Unknown user: {sub!r}")
+    return {"sub": sub, "reset": True}
+
+
 def admin_set_role(request: Request, sub: str, role: str) -> dict[str, Any]:
     """Assign a role override to a user: admin, write, read, or default
     (fall back to the environment-configured permissions). Takes effect
@@ -1524,6 +1557,8 @@ def _api_registry() -> dict[str, Any]:
         "admin_get_users": admin_get_users,
         "admin_revoke_user_sessions": admin_revoke_user_sessions,
         "admin_set_role": admin_set_role,
+        "admin_create_user": admin_create_user,
+        "admin_reset_password": admin_reset_password,
     }
 
 
@@ -1547,6 +1582,7 @@ def build_starlette_app_only(
         Route(OAUTH_CALLBACK_PATH, oauth_hf_callback, methods=["GET"]),
         Route("/oauth/logout", oauth_logout, methods=["GET"]),
         *oidc.oidc_routes(),
+        *local_auth.local_auth_routes(),
     ]
     mcp_lifespan = None
     mcp_routes: list[Any] = []

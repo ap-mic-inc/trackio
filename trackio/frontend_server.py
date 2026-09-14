@@ -116,6 +116,7 @@ class FrontendMiddleware(BaseHTTPMiddleware):
             "/api",
             "/oauth",
             "/login",
+            "/setup",
         }
 
     async def dispatch(self, request, call_next):

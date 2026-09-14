@@ -452,7 +452,7 @@ def test_middleware_blocks_without_session(monkeypatch):
     assert resp.status_code == 401
     resp = client.get("/")
     assert resp.status_code == 302
-    assert resp.headers["location"].endswith(oidc.OIDC_START_PATH)
+    assert resp.headers["location"].endswith("/login")
     assert client.get("/version").status_code == 200
 
 
@@ -500,7 +500,11 @@ def test_apply_role_override():
 
 
 def test_first_user_becomes_admin(monkeypatch):
-    config = _configure(monkeypatch, TRACKIO_OIDC_WRITE_USERS="somebody@b.c")
+    config = _configure(
+        monkeypatch,
+        TRACKIO_OIDC_WRITE_USERS="somebody@b.c",
+        TRACKIO_OIDC_FIRST_USER_ADMIN="1",
+    )
     claims = {"sub": "first-user", "email": "first@b.c"}
     allowed, can_write, is_admin, bootstrapped = oidc.resolve_login_permissions(
         config, claims
@@ -522,8 +526,20 @@ def test_first_user_becomes_admin(monkeypatch):
     assert allowed and can_write and is_admin and not bootstrapped
 
 
+def test_no_bootstrap_by_default(monkeypatch):
+    config = _configure(monkeypatch)
+    _, _, is_admin, bootstrapped = oidc.resolve_login_permissions(
+        config, {"sub": "s", "email": "random@b.c"}
+    )
+    assert not is_admin and not bootstrapped
+
+
 def test_no_bootstrap_when_env_admins_configured(monkeypatch):
-    config = _configure(monkeypatch, TRACKIO_OIDC_ADMIN_USERS="boss@b.c")
+    config = _configure(
+        monkeypatch,
+        TRACKIO_OIDC_ADMIN_USERS="boss@b.c",
+        TRACKIO_OIDC_FIRST_USER_ADMIN="1",
+    )
     _, _, is_admin, bootstrapped = oidc.resolve_login_permissions(
         config, {"sub": "s", "email": "random@b.c"}
     )

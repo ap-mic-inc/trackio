@@ -287,6 +287,14 @@ export async function adminSetRole(sub, role) {
   return await callApi("/admin_set_role", { sub, role });
 }
 
+export async function adminCreateUser(username, password, role) {
+  return await callApi("/admin_create_user", { username, password, role });
+}
+
+export async function adminResetPassword(sub, password) {
+  return await callApi("/admin_reset_password", { sub, password });
+}
+
 export async function deleteRun(project, run) {
   const params = { project, ...normalizeRun(run) };
   if (await isStaticMode()) return staticApi.deleteRun(project, run);

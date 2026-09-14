@@ -111,6 +111,7 @@
     allowed: true,
     auth: "local",
     oidcEnabled: false,
+    loginEnabled: false,
     user: null,
     admin: false,
   });
@@ -351,6 +352,7 @@
         allowed: !!s.allowed,
         auth: s.auth ?? "none",
         oidcEnabled: !!s.oidc_enabled,
+        loginEnabled: !!s.login_enabled,
         user: s.user ?? null,
         admin: !!s.admin,
       };
@@ -360,6 +362,7 @@
         allowed: true,
         auth: "local",
         oidcEnabled: false,
+        loginEnabled: false,
         user: null,
         admin: false,
       };
@@ -599,6 +602,7 @@
       runMutationAllowed={mutationStatus.allowed}
       mutationAuth={mutationStatus.auth}
       oidcEnabled={mutationStatus.oidcEnabled}
+      loginEnabled={mutationStatus.loginEnabled}
       authUser={mutationStatus.user}
       {readOnlySource}
       {projects}

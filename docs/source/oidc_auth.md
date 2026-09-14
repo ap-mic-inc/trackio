@@ -1,6 +1,21 @@
-# OIDC Authentication (Self-hosted)
+# Authentication (Self-hosted)
 
-A self-hosted Trackio server can require sign-in through any OpenID Connect provider (Keycloak, Authentik, Google, Microsoft Entra ID, Okta, ...) and map signed-in users to read or write permissions. This complements the [write token](self_hosted_server.md): training scripts keep authenticating with `TRACKIO_WRITE_TOKEN`, while humans use the browser sign-in flow.
+A self-hosted Trackio server supports two kinds of browser sign-in, sharing one session and permission system:
+
+- **Local accounts**: username/password accounts managed by the server itself, starting with a first-run `/setup` page that registers the admin account.
+- **OIDC**: sign-in through any OpenID Connect provider (Keycloak, Authentik, Google, Microsoft Entra ID, Okta, ...).
+
+Both complement the [write token](self_hosted_server.md): training scripts keep authenticating with `TRACKIO_WRITE_TOKEN`, while humans use the browser sign-in flow.
+
+## Local accounts & first-run setup
+
+A fresh server needs no configuration to get an administrator:
+
+1. Open the dashboard and click **Sign in** (or visit `/setup` directly).
+2. While the server has no admin anywhere, the setup page lets you **register the first admin account** (username + password). It signs you in immediately and the setup page closes permanently.
+3. From the Admin tab you can then create more local accounts (username, password, role) and reset their passwords. Local users sign in at `/login`.
+
+Local accounts are stored in `TRACKIO_DIR/auth/auth.db` with scrypt-hashed passwords. The `/login` page also shows a "Sign in with OIDC" button whenever OIDC is configured, so both kinds of users share one entry point. The setup page is disabled when `TRACKIO_OIDC_ADMIN_USERS`/`TRACKIO_OIDC_ADMIN_GROUPS` are configured (the environment already defines the admins).
 
 ## Enable OIDC login
 
@@ -32,7 +47,7 @@ Two levels exist: **read** (view dashboards) and **write** (log metrics, upload 
 | `TRACKIO_OIDC_WRITE_GROUPS` | Groups granted write access. |
 | `TRACKIO_OIDC_ADMIN_USERS` | Emails/usernames/subs granted admin access (see [Admin page](#admin-page)). Admins always have write access and may sign in even when not in the allowed lists. |
 | `TRACKIO_OIDC_ADMIN_GROUPS` | Groups granted admin access. |
-| `TRACKIO_OIDC_FIRST_USER_ADMIN` | Promote the first sign-in to admin when no admin exists anywhere (default `1`). |
+| `TRACKIO_OIDC_FIRST_USER_ADMIN` | Opt-in (`1`): promote the first OIDC sign-in to admin when no admin exists anywhere. Default off — the first admin is registered on the `/setup` page instead. |
 | `TRACKIO_OIDC_GROUPS_CLAIM` | Claim that holds the user's groups (default `groups`). |
 | `TRACKIO_OIDC_SCOPES` | Requested scopes (default `openid profile email`). |
 
@@ -72,7 +87,8 @@ Admins see an **Admin** tab in the dashboard navbar showing:
 
 Who is an admin:
 
-- **The first user to sign in.** When no admin is configured via environment variables and none has been stored yet, the first OIDC sign-in is automatically promoted to admin — so a fresh server bootstraps itself without any permission configuration. Disable with `TRACKIO_OIDC_FIRST_USER_ADMIN=0` (recommended for servers exposed before you sign in).
+- **The account registered on the first-run `/setup` page** (see [Local accounts](#local-accounts--first-run-setup)).
+- Optionally, the first user to sign in via OIDC, when `TRACKIO_OIDC_FIRST_USER_ADMIN=1` is set and no admin exists anywhere.
 - Users/groups listed in `TRACKIO_OIDC_ADMIN_USERS` / `TRACKIO_OIDC_ADMIN_GROUPS`.
 - Anyone assigned the admin role from the Admin page (see below).
 - Anyone with the server write token (the write-access URL from `trackio.show()`), so the server owner always has access even before OIDC is configured.

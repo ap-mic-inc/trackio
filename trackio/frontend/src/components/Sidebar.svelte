@@ -42,6 +42,7 @@
     runMutationAllowed = true,
     mutationAuth = "local",
     oidcEnabled = false,
+    loginEnabled = false,
     authUser = null,
     readOnlySource = null,
     projectLocked = false,
@@ -74,7 +75,7 @@
 
   let oidcLoginHref = $derived.by(() => {
     navTick;
-    return `${window.location.origin}${window.__trackio_base || ""}/oauth/oidc/start`;
+    return `${window.location.origin}${window.__trackio_base || ""}/login`;
   });
 
 
@@ -589,7 +590,7 @@
           {/if}
           <a class="oauth-logout" href={`${window.__trackio_base || ""}/oauth/logout`}>Logout</a>
         </div>
-      {:else if !spacesMode && oidcEnabled && !runMutationAllowed}
+      {:else if !spacesMode && (loginEnabled || oidcEnabled) && !runMutationAllowed}
         <div class="oauth-footer">
           <a class="oidc-login-btn" href={oidcLoginHref}>Sign in</a>
           <p class="oauth-hint">
