@@ -1,4 +1,4 @@
-"""Tests for generic OIDC authentication."""
+"""Tests for generic OIDC authentication, the auth store, and admin APIs."""
 
 import time
 from unittest.mock import Mock
@@ -9,11 +9,11 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 from starlette.testclient import TestClient
 
-from trackio import oidc
+from trackio import auth_store, oidc
 
 
 @pytest.fixture(autouse=True)
-def clean_oidc_state(monkeypatch):
+def clean_oidc_state(monkeypatch, tmp_path):
     for var in (
         "TRACKIO_OIDC_ISSUER",
         "TRACKIO_OIDC_CLIENT_ID",
@@ -23,16 +23,21 @@ def clean_oidc_state(monkeypatch):
         "TRACKIO_OIDC_ALLOWED_GROUPS",
         "TRACKIO_OIDC_WRITE_USERS",
         "TRACKIO_OIDC_WRITE_GROUPS",
+        "TRACKIO_OIDC_ADMIN_USERS",
+        "TRACKIO_OIDC_ADMIN_GROUPS",
         "TRACKIO_OIDC_GROUPS_CLAIM",
         "TRACKIO_AUTH_REQUIRED",
         "TRACKIO_OIDC_COOKIE_SECURE",
     ):
         monkeypatch.delenv(var, raising=False)
+    monkeypatch.setattr("trackio.utils.TRACKIO_DIR", tmp_path)
     oidc._sessions.clear()
     oidc._pending_states.clear()
+    auth_store._last_activity_write.clear()
     yield
     oidc._sessions.clear()
     oidc._pending_states.clear()
+    auth_store._last_activity_write.clear()
 
 
 def _configure(monkeypatch, **env):
@@ -70,17 +75,17 @@ def test_auth_required_flag(monkeypatch):
 
 def test_permissions_default_all_can_write(monkeypatch):
     config = _configure(monkeypatch)
-    allowed, can_write = oidc.evaluate_permissions(
+    allowed, can_write, is_admin = oidc.evaluate_permissions(
         config, {"sub": "abc", "email": "a@b.c"}
     )
-    assert allowed and can_write
+    assert allowed and can_write and not is_admin
 
 
 def test_permissions_allowed_users(monkeypatch):
     config = _configure(monkeypatch, TRACKIO_OIDC_ALLOWED_USERS="a@b.c, other@x.y")
-    allowed, _ = oidc.evaluate_permissions(config, {"sub": "s", "email": "A@B.C"})
+    allowed, _, _ = oidc.evaluate_permissions(config, {"sub": "s", "email": "A@B.C"})
     assert allowed
-    allowed, can_write = oidc.evaluate_permissions(
+    allowed, can_write, _ = oidc.evaluate_permissions(
         config, {"sub": "s", "email": "nope@b.c"}
     )
     assert not allowed and not can_write
@@ -88,21 +93,21 @@ def test_permissions_allowed_users(monkeypatch):
 
 def test_permissions_allowed_groups(monkeypatch):
     config = _configure(monkeypatch, TRACKIO_OIDC_ALLOWED_GROUPS="ml-team")
-    allowed, _ = oidc.evaluate_permissions(
+    allowed, _, _ = oidc.evaluate_permissions(
         config, {"sub": "s", "groups": ["ml-team", "misc"]}
     )
     assert allowed
-    allowed, _ = oidc.evaluate_permissions(config, {"sub": "s", "groups": ["misc"]})
+    allowed, _, _ = oidc.evaluate_permissions(config, {"sub": "s", "groups": ["misc"]})
     assert not allowed
 
 
 def test_permissions_write_users(monkeypatch):
     config = _configure(monkeypatch, TRACKIO_OIDC_WRITE_USERS="admin@b.c")
-    allowed, can_write = oidc.evaluate_permissions(
+    allowed, can_write, _ = oidc.evaluate_permissions(
         config, {"sub": "s", "email": "admin@b.c"}
     )
     assert allowed and can_write
-    allowed, can_write = oidc.evaluate_permissions(
+    allowed, can_write, _ = oidc.evaluate_permissions(
         config, {"sub": "s", "email": "viewer@b.c"}
     )
     assert allowed and not can_write
@@ -110,7 +115,7 @@ def test_permissions_write_users(monkeypatch):
 
 def test_permissions_write_star(monkeypatch):
     config = _configure(monkeypatch, TRACKIO_OIDC_WRITE_USERS="*")
-    _, can_write = oidc.evaluate_permissions(config, {"sub": "s"})
+    _, can_write, _ = oidc.evaluate_permissions(config, {"sub": "s"})
     assert can_write
 
 
@@ -120,11 +125,11 @@ def test_permissions_write_groups(monkeypatch):
         TRACKIO_OIDC_WRITE_USERS="admin@b.c",
         TRACKIO_OIDC_WRITE_GROUPS="trackio-writers",
     )
-    _, can_write = oidc.evaluate_permissions(
+    _, can_write, _ = oidc.evaluate_permissions(
         config, {"sub": "s", "email": "u@b.c", "groups": ["trackio-writers"]}
     )
     assert can_write
-    _, can_write = oidc.evaluate_permissions(
+    _, can_write, _ = oidc.evaluate_permissions(
         config, {"sub": "s", "email": "u@b.c", "groups": ["readers"]}
     )
     assert not can_write
@@ -136,8 +141,42 @@ def test_permissions_custom_groups_claim(monkeypatch):
         TRACKIO_OIDC_GROUPS_CLAIM="roles",
         TRACKIO_OIDC_WRITE_GROUPS="writer",
     )
-    _, can_write = oidc.evaluate_permissions(config, {"sub": "s", "roles": ["writer"]})
+    _, can_write, _ = oidc.evaluate_permissions(
+        config, {"sub": "s", "roles": ["writer"]}
+    )
     assert can_write
+
+
+def test_permissions_admin_users(monkeypatch):
+    config = _configure(
+        monkeypatch,
+        TRACKIO_OIDC_WRITE_USERS="writer@b.c",
+        TRACKIO_OIDC_ADMIN_USERS="boss@b.c",
+    )
+    allowed, can_write, is_admin = oidc.evaluate_permissions(
+        config, {"sub": "s", "email": "boss@b.c"}
+    )
+    assert allowed and can_write and is_admin
+    allowed, can_write, is_admin = oidc.evaluate_permissions(
+        config, {"sub": "s", "email": "writer@b.c"}
+    )
+    assert allowed and can_write and not is_admin
+
+
+def test_permissions_admin_bypasses_allowed_list(monkeypatch):
+    config = _configure(
+        monkeypatch,
+        TRACKIO_OIDC_ALLOWED_USERS="member@b.c",
+        TRACKIO_OIDC_ADMIN_GROUPS="ops",
+    )
+    allowed, can_write, is_admin = oidc.evaluate_permissions(
+        config, {"sub": "s", "email": "boss@b.c", "groups": ["ops"]}
+    )
+    assert allowed and can_write and is_admin
+    allowed, _, _ = oidc.evaluate_permissions(
+        config, {"sub": "s", "email": "random@b.c"}
+    )
+    assert not allowed
 
 
 def _mock_request_with_cookie(cookie: str) -> Mock:
@@ -146,14 +185,21 @@ def _mock_request_with_cookie(cookie: str) -> Mock:
     return request
 
 
-def _install_session(session_id: str = "sess123", can_write: bool = True):
+def _install_session(
+    session_id: str = "sess123",
+    can_write: bool = True,
+    is_admin: bool = False,
+    sub: str = "user-1",
+    name: str = "Alice",
+):
     oidc._sessions[session_id] = oidc.OidcSession(
-        sub="user-1",
+        sub=sub,
         email="a@b.c",
-        name="Alice",
+        name=name,
         username="alice",
         groups=("ml-team",),
         can_write=can_write,
+        is_admin=is_admin,
     )
     return session_id
 
@@ -178,6 +224,93 @@ def test_get_oidc_session_expired():
     request = _mock_request_with_cookie(f"trackio_oidc_session={session_id}")
     assert oidc.get_oidc_session(request) is None
     assert session_id not in oidc._sessions
+
+
+def test_session_survives_restart():
+    auth_store.record_login(
+        sub="user-1",
+        email="a@b.c",
+        name="Alice",
+        username="alice",
+        groups=("ml-team",),
+        can_write=True,
+        is_admin=True,
+    )
+    auth_store.persist_session("persisted-1", "user-1")
+
+    oidc._sessions.clear()
+    request = _mock_request_with_cookie("trackio_oidc_session=persisted-1")
+    session = oidc.get_oidc_session(request)
+    assert session is not None
+    assert session.sub == "user-1"
+    assert session.can_write and session.is_admin
+    assert "persisted-1" in oidc._sessions
+
+
+def test_revoke_sessions_for_sub():
+    _install_session("s1", sub="user-1")
+    _install_session("s2", sub="user-1")
+    _install_session("s3", sub="user-2", name="Bob")
+    auth_store.record_login("user-1", "a@b.c", "Alice", "alice", (), True, False)
+    auth_store.persist_session("s1", "user-1")
+    auth_store.persist_session("s2", "user-1")
+
+    revoked = oidc.revoke_sessions_for_sub("user-1")
+    assert revoked == 2
+    assert "s1" not in oidc._sessions and "s2" not in oidc._sessions
+    assert "s3" in oidc._sessions
+    request = _mock_request_with_cookie("trackio_oidc_session=s1")
+    assert oidc.get_oidc_session(request) is None
+
+
+def test_auth_store_login_and_users():
+    auth_store.record_login("u1", "a@b.c", "Alice", "alice", ("ml",), True, False)
+    auth_store.record_login("u1", "a@b.c", "Alice", "alice", ("ml",), True, True)
+    auth_store.record_login("u2", "b@b.c", "Bob", "bob", (), False, False)
+    auth_store.persist_session("sess-a", "u1")
+
+    users = auth_store.list_users()
+    by_sub = {u["sub"]: u for u in users}
+    assert by_sub["u1"]["login_count"] == 2
+    assert by_sub["u1"]["is_admin"] is True
+    assert by_sub["u1"]["active_sessions"] == 1
+    assert by_sub["u2"]["can_write"] is False
+    assert by_sub["u2"]["active_sessions"] == 0
+
+
+def test_auth_store_activity_and_throttle():
+    auth_store.record_activity("u1", "proj-a", "log")
+    auth_store.record_activity("u1", "proj-a", "log")
+    users = auth_store.list_users()
+    auth_store.record_login("u1", "a@b.c", "Alice", "alice", (), True, False)
+    users = auth_store.list_users()
+    projects = users[0]["projects"]
+    assert len(projects) == 1
+    assert projects[0]["project"] == "proj-a"
+    assert projects[0]["actions"] == {"log": 1}
+
+    auth_store._last_activity_write.clear()
+    auth_store.record_activity("u1", "proj-a", "log")
+    auth_store.record_activity("u1", "proj-b", "manage")
+    users = auth_store.list_users()
+    projects = {p["project"]: p for p in users[0]["projects"]}
+    assert projects["proj-a"]["actions"] == {"log": 2}
+    assert projects["proj-b"]["actions"] == {"manage": 1}
+
+
+def test_auth_store_write_token_projects():
+    auth_store.record_activity(auth_store.WRITE_TOKEN_ACTOR, "proj-x", "log")
+    entries = auth_store.write_token_projects()
+    assert len(entries) == 1
+    assert entries[0]["project"] == "proj-x"
+    assert entries[0]["actions"] == {"log": 1}
+
+
+def test_auth_store_session_expiry():
+    auth_store.record_login("u1", "a@b.c", "Alice", "alice", (), True, False)
+    auth_store.persist_session("old", "u1")
+    assert auth_store.load_session("old", ttl_seconds=0) is None
+    assert auth_store.load_session("old", ttl_seconds=3600) is None
 
 
 def test_server_write_checks_accept_oidc(monkeypatch):
@@ -214,6 +347,13 @@ def test_get_run_mutation_status_reports_oidc(monkeypatch):
     assert status["auth"] == "oidc"
     assert status["oidc_enabled"] is True
     assert status["user"] == "Alice"
+    assert status["admin"] is False
+
+    admin_id = _install_session(session_id="adm", is_admin=True, name="Root")
+    request = _mock_request_with_cookie(f"trackio_oidc_session={admin_id}")
+    request.query_params = {}
+    status = server.get_run_mutation_status(request)
+    assert status["admin"] is True
 
     readonly_id = _install_session(session_id="readonly", can_write=False)
     request = _mock_request_with_cookie(f"trackio_oidc_session={readonly_id}")
@@ -228,6 +368,51 @@ def test_get_run_mutation_status_reports_oidc(monkeypatch):
     assert status["auth"] == "none"
     assert status["oidc_enabled"] is True
     assert status["user"] is None
+    assert status["admin"] is False
+
+
+def test_admin_endpoints(monkeypatch):
+    from trackio import server
+    from trackio.exceptions import TrackioAPIError
+
+    _configure(monkeypatch)
+    auth_store.record_login("user-1", "a@b.c", "Alice", "alice", (), True, False)
+    auth_store.persist_session("sess123", "user-1")
+    auth_store.record_activity("user-1", "proj-a", "log")
+
+    viewer_id = _install_session(
+        session_id="viewer", can_write=False, sub="user-viewer"
+    )
+    request = _mock_request_with_cookie(f"trackio_oidc_session={viewer_id}")
+    request.query_params = {}
+    with pytest.raises(TrackioAPIError):
+        server.admin_get_users(request)
+
+    admin_id = _install_session(
+        session_id="adm", is_admin=True, sub="user-admin", name="Root"
+    )
+    request = _mock_request_with_cookie(f"trackio_oidc_session={admin_id}")
+    request.query_params = {}
+    result = server.admin_get_users(request)
+    assert result["oidc_enabled"] is True
+    subs = [u["sub"] for u in result["users"]]
+    assert "user-1" in subs
+    user = next(u for u in result["users"] if u["sub"] == "user-1")
+    assert user["projects"][0]["project"] == "proj-a"
+    assert user["active_sessions"] == 1
+
+    token_request = Mock()
+    token_request.headers = {"x-trackio-write-token": server.write_token}
+    token_request.query_params = {}
+    result = server.admin_get_users(token_request)
+    assert "user-1" in [u["sub"] for u in result["users"]]
+
+    _install_session("sess123", sub="user-1")
+    revoke = server.admin_revoke_user_sessions(request, "user-1")
+    assert revoke["revoked"] == 1
+    result = server.admin_get_users(request)
+    user = next(u for u in result["users"] if u["sub"] == "user-1")
+    assert user["active_sessions"] == 0
 
 
 def _make_gated_app(write_token: str = "wt-secret") -> TestClient:

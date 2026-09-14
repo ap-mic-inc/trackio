@@ -24,6 +24,7 @@ from starlette.requests import Request
 from starlette.responses import RedirectResponse
 from starlette.routing import Route
 
+import trackio.auth_store as auth_store
 import trackio.cas as cas
 import trackio.oidc as oidc
 import trackio.references as references
@@ -461,6 +462,36 @@ def _has_oidc_write_access(request: Request) -> bool:
     return session is not None and session.can_write
 
 
+def _is_admin(request: Request) -> bool:
+    if check_write_access(request, write_token):
+        return True
+    session = oidc.get_oidc_session(request)
+    return session is not None and session.is_admin
+
+
+def assert_is_admin(request: Request) -> None:
+    if _is_admin(request):
+        return
+    raise TrackioAPIError(
+        "Admin access is required. Sign in via OIDC as an admin user, or use "
+        "the write-access URL from trackio.show()."
+    )
+
+
+def _record_write_activity(request: Request, projects: Any, action: str) -> None:
+    if on_spaces():
+        return
+    if isinstance(projects, str):
+        projects = [projects]
+    session = oidc.get_oidc_session(request)
+    actor = session.sub if session is not None else auth_store.WRITE_TOKEN_ACTOR
+    try:
+        for project in {p for p in projects if p}:
+            auth_store.record_activity(actor, project, action)
+    except Exception as e:
+        logger.warning("failed to record write activity: %s", e)
+
+
 def assert_can_write_metrics(request: Request, hf_token: str | None) -> None:
     if on_spaces():
         check_hf_token_has_write_access(hf_token)
@@ -543,6 +574,7 @@ def get_run_mutation_status(request: Request) -> dict[str, Any]:
         session = oidc.get_oidc_session(request)
         oidc_on = oidc.oidc_enabled()
         user = session.display_name if session is not None else None
+        admin = _is_admin(request)
         if check_write_access(request, write_token):
             return {
                 "spaces": False,
@@ -550,6 +582,7 @@ def get_run_mutation_status(request: Request) -> dict[str, Any]:
                 "auth": "local",
                 "oidc_enabled": oidc_on,
                 "user": user,
+                "admin": True,
             }
         if session is not None:
             return {
@@ -558,6 +591,7 @@ def get_run_mutation_status(request: Request) -> dict[str, Any]:
                 "auth": "oidc" if session.can_write else "oidc_insufficient",
                 "oidc_enabled": True,
                 "user": user,
+                "admin": admin,
             }
         return {
             "spaces": False,
@@ -565,6 +599,7 @@ def get_run_mutation_status(request: Request) -> dict[str, Any]:
             "auth": "none",
             "oidc_enabled": oidc_on,
             "user": None,
+            "admin": False,
         }
     hf_tok = _hf_access_token(request)
     if hf_tok is not None:
@@ -645,6 +680,9 @@ def bulk_upload_media(
     hf_token: str | None,
 ) -> None:
     assert_can_write_metrics(request, hf_token)
+    _record_write_activity(
+        request, [upload.get("project") for upload in uploads], "upload"
+    )
 
     def _write(upload: UploadEntry, src: Path) -> None:
         media_path = get_project_media_path(
@@ -708,6 +746,7 @@ def artifact_log(
 ) -> dict[str, Any]:
     assert_can_write_metrics(request, hf_token)
     project = _validate_project_name(project)
+    _record_write_activity(request, project, "artifact")
     try:
         cas.validate_artifact_name(name)
     except ValueError as err:
@@ -842,6 +881,7 @@ def log(
     run_id: str | None = None,
 ) -> None:
     assert_can_write_metrics(request, hf_token)
+    _record_write_activity(request, project, "log")
     SQLiteStorage.log(
         project=project, run=run, run_id=run_id, metrics=metrics, step=step
     )
@@ -853,6 +893,7 @@ def bulk_log(
     hf_token: str | None,
 ) -> None:
     assert_can_write_metrics(request, hf_token)
+    _record_write_activity(request, [entry.get("project") for entry in logs], "log")
 
     logs_by_run = {}
     for log_entry in logs:
@@ -893,6 +934,7 @@ def bulk_log_system(
     hf_token: str | None,
 ) -> None:
     assert_can_write_metrics(request, hf_token)
+    _record_write_activity(request, [entry.get("project") for entry in logs], "log")
 
     logs_by_run = {}
     for log_entry in logs:
@@ -1366,6 +1408,7 @@ def delete_run(
     run_id: str | None = None,
 ) -> bool:
     assert_can_mutate_runs(request)
+    _record_write_activity(request, project, "manage")
     return SQLiteStorage.delete_run(project, run, run_id=run_id)
 
 
@@ -1377,8 +1420,27 @@ def rename_run(
     run_id: str | None = None,
 ) -> bool:
     assert_can_mutate_runs(request)
+    _record_write_activity(request, project, "manage")
     SQLiteStorage.rename_run(project, old_name, new_name, run_id=run_id)
     return True
+
+
+def admin_get_users(request: Request) -> dict[str, Any]:
+    """List signed-in users, their permissions, and per-project write
+    activity. Admin only."""
+    assert_is_admin(request)
+    return {
+        "users": auth_store.list_users(),
+        "write_token_projects": auth_store.write_token_projects(),
+        "oidc_enabled": oidc.oidc_enabled(),
+        "auth_required": oidc.auth_required(),
+    }
+
+
+def admin_revoke_user_sessions(request: Request, sub: str) -> dict[str, Any]:
+    """Sign a user out everywhere by revoking their sessions. Admin only."""
+    assert_is_admin(request)
+    return {"revoked": oidc.revoke_sessions_for_sub(sub)}
 
 
 def force_sync() -> bool:
@@ -1445,6 +1507,8 @@ def _api_registry() -> dict[str, Any]:
         "delete_run": delete_run,
         "rename_run": rename_run,
         "force_sync": force_sync,
+        "admin_get_users": admin_get_users,
+        "admin_revoke_user_sessions": admin_revoke_user_sessions,
     }
 
 

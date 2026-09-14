@@ -275,6 +275,14 @@ export async function getRunMutationStatus() {
   return await callApi("/get_run_mutation_status", {});
 }
 
+export async function getAdminUsers() {
+  return await callApi("/admin_get_users", {});
+}
+
+export async function revokeUserSessions(sub) {
+  return await callApi("/admin_revoke_user_sessions", { sub });
+}
+
 export async function deleteRun(project, run) {
   const params = { project, ...normalizeRun(run) };
   if (await isStaticMode()) return staticApi.deleteRun(project, run);

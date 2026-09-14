@@ -50,6 +50,7 @@
     clearArtifactSelectionParams,
   } from "./lib/router.js";
   import Settings from "./pages/Settings.svelte";
+  import Admin from "./pages/Admin.svelte";
   import { initTheme, isDark, onThemeChange } from "./lib/theme.js";
   import { applyUrlTokens } from "./lib/urlTokens.js";
 
@@ -111,6 +112,7 @@
     auth: "local",
     oidcEnabled: false,
     user: null,
+    admin: false,
   });
   let mutationPollTimer = $state(null);
   let appBootstrapReady = $state(false);
@@ -350,6 +352,7 @@
         auth: s.auth ?? "none",
         oidcEnabled: !!s.oidc_enabled,
         user: s.user ?? null,
+        admin: !!s.admin,
       };
     } catch {
       mutationStatus = {
@@ -358,6 +361,7 @@
         auth: "local",
         oidcEnabled: false,
         user: null,
+        admin: false,
       };
     }
   }
@@ -643,6 +647,7 @@
         {tabAvailability}
         optionalEmptyTabs={OPTIONAL_EMPTY_TABS}
         {hideEmptyTabs}
+        showAdmin={mutationStatus.admin && !mutationStatus.spaces}
         onNavigate={handleNavigate}
       />
     {/if}
@@ -713,6 +718,8 @@
         />
       {:else if currentPage === "settings"}
         <Settings {spaceId} selectedProject={selectedProject} {projects} />
+      {:else if currentPage === "admin"}
+        <Admin isAdmin={mutationStatus.admin} />
       {/if}
     </div>
   </div>

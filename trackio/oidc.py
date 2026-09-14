@@ -17,6 +17,9 @@ Configuration (environment variables):
 - TRACKIO_OIDC_WRITE_USERS: comma-separated emails/usernames/subs granted
   write access. ``*`` grants write to every signed-in user.
 - TRACKIO_OIDC_WRITE_GROUPS: comma-separated groups granted write access.
+- TRACKIO_OIDC_ADMIN_USERS / TRACKIO_OIDC_ADMIN_GROUPS: users/groups granted
+  admin access (the Admin page in the dashboard). Admins always have write
+  access. Anyone with the server write token is also an admin.
 - TRACKIO_OIDC_GROUPS_CLAIM: claim holding the user's groups (default:
   ``groups``).
 - TRACKIO_AUTH_REQUIRED: when truthy, every dashboard/API request requires a
@@ -47,6 +50,8 @@ import httpx
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 from starlette.routing import Route
+
+from trackio import auth_store
 
 logger = logging.getLogger("trackio.oidc")
 
@@ -79,6 +84,8 @@ class OidcConfig:
     allowed_groups: frozenset[str]
     write_users: frozenset[str]
     write_groups: frozenset[str]
+    admin_users: frozenset[str]
+    admin_groups: frozenset[str]
     groups_claim: str
     auth_required: bool
     cookie_secure: bool | None
@@ -111,6 +118,8 @@ def load_oidc_config() -> OidcConfig | None:
         allowed_groups=_csv_set(os.environ.get("TRACKIO_OIDC_ALLOWED_GROUPS")),
         write_users=_csv_set(os.environ.get("TRACKIO_OIDC_WRITE_USERS")),
         write_groups=_csv_set(os.environ.get("TRACKIO_OIDC_WRITE_GROUPS")),
+        admin_users=_csv_set(os.environ.get("TRACKIO_OIDC_ADMIN_USERS")),
+        admin_groups=_csv_set(os.environ.get("TRACKIO_OIDC_ADMIN_GROUPS")),
         groups_claim=(os.environ.get("TRACKIO_OIDC_GROUPS_CLAIM") or "groups").strip(),
         auth_required=_truthy(os.environ.get("TRACKIO_AUTH_REQUIRED")),
         cookie_secure=(
@@ -136,6 +145,7 @@ class OidcSession:
     username: str | None
     groups: tuple[str, ...]
     can_write: bool
+    is_admin: bool = False
     created: float = field(default_factory=time.monotonic)
 
     @property
@@ -210,28 +220,39 @@ def _claim_groups(claims: dict[str, Any], groups_claim: str) -> tuple[str, ...]:
 
 def evaluate_permissions(
     config: OidcConfig, claims: dict[str, Any]
-) -> tuple[bool, bool]:
-    """Return (allowed_to_sign_in, can_write) for the given claims."""
+) -> tuple[bool, bool, bool]:
+    """Return (allowed_to_sign_in, can_write, is_admin) for the given claims.
+
+    Admins always have write access. Admins configured via
+    TRACKIO_OIDC_ADMIN_USERS/GROUPS may sign in even when not listed in the
+    allowed users/groups.
+    """
     identities = _identity_values(claims)
     groups = {g.lower() for g in _claim_groups(claims, config.groups_claim)}
 
+    is_admin = bool(identities & config.admin_users) or bool(
+        groups & config.admin_groups
+    )
+
     if config.allowed_users or config.allowed_groups:
-        allowed = bool(identities & config.allowed_users) or bool(
-            groups & config.allowed_groups
+        allowed = (
+            is_admin
+            or bool(identities & config.allowed_users)
+            or bool(groups & config.allowed_groups)
         )
     else:
         allowed = True
     if not allowed:
-        return False, False
+        return False, False, False
 
-    if config.write_open_to_all:
-        return True, True
+    if is_admin or config.write_open_to_all:
+        return True, True, is_admin
     can_write = (
         "*" in config.write_users
         or bool(identities & config.write_users)
         or bool(groups & config.write_groups)
     )
-    return True, can_write
+    return True, can_write, is_admin
 
 
 def _root_path(request: Request) -> str:
@@ -268,12 +289,32 @@ def get_oidc_session(request: Request) -> OidcSession | None:
         return None
     with _lock:
         session = _sessions.get(session_id)
-    if session is None:
+    if session is not None:
+        if time.monotonic() - session.created > _SESSION_TTL:
+            with _lock:
+                _sessions.pop(session_id, None)
+            auth_store.delete_session(session_id)
+            return None
+        return session
+    return _restore_persisted_session(session_id)
+
+
+def _restore_persisted_session(session_id: str) -> OidcSession | None:
+    stored = auth_store.load_session(session_id, _SESSION_TTL)
+    if stored is None:
         return None
-    if time.monotonic() - session.created > _SESSION_TTL:
-        with _lock:
-            _sessions.pop(session_id, None)
-        return None
+    session = OidcSession(
+        sub=stored["sub"],
+        email=stored["email"],
+        name=stored["name"],
+        username=stored["username"],
+        groups=stored["groups"],
+        can_write=stored["can_write"],
+        is_admin=stored["is_admin"],
+        created=time.monotonic() - stored["age"],
+    )
+    with _lock:
+        _sessions[session_id] = session
     return session
 
 
@@ -288,6 +329,18 @@ def drop_session(request: Request) -> None:
         if len(parts) == 2 and parts[0] == OIDC_SESSION_COOKIE:
             with _lock:
                 _sessions.pop(parts[1], None)
+            auth_store.delete_session(parts[1])
+
+
+def revoke_sessions_for_sub(sub: str) -> int:
+    revoked_ids = set(auth_store.delete_sessions_for_sub(sub))
+    with _lock:
+        for session_id in [
+            k for k, s in _sessions.items() if s.sub == sub or k in revoked_ids
+        ]:
+            revoked_ids.add(session_id)
+            del _sessions[session_id]
+    return len(revoked_ids)
 
 
 def oidc_start(request: Request) -> Response:
@@ -386,7 +439,7 @@ def oidc_callback(request: Request) -> Response:
     if not isinstance(sub, str) or not sub:
         return RedirectResponse(url=err, status_code=302)
 
-    allowed, can_write = evaluate_permissions(config, claims)
+    allowed, can_write, is_admin = evaluate_permissions(config, claims)
     if not allowed:
         logger.warning("OIDC sign-in denied for sub=%s", sub)
         return RedirectResponse(
@@ -400,11 +453,22 @@ def oidc_callback(request: Request) -> Response:
         username=claims.get("preferred_username"),
         groups=_claim_groups(claims, config.groups_claim),
         can_write=can_write,
+        is_admin=is_admin,
     )
     session_id = secrets.token_urlsafe(32)
     with _lock:
         _sessions[session_id] = session
     _evict_expired()
+    auth_store.record_login(
+        sub=session.sub,
+        email=session.email,
+        name=session.name,
+        username=session.username,
+        groups=session.groups,
+        can_write=session.can_write,
+        is_admin=session.is_admin,
+    )
+    auth_store.persist_session(session_id, session.sub)
 
     resp = RedirectResponse(url=f"{_root_path(request)}/", status_code=302)
     resp.set_cookie(

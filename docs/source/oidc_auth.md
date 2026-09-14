@@ -18,7 +18,7 @@ export TRACKIO_OIDC_CLIENT_ID="trackio"
 export TRACKIO_OIDC_CLIENT_SECRET="..."
 ```
 
-The provider's endpoints are discovered automatically from `{issuer}/.well-known/openid-configuration`. The login flow uses the authorization code flow with PKCE. A "Sign in" button appears in the dashboard sidebar; sessions last 30 days and are kept in server memory (a restart signs everyone out).
+The provider's endpoints are discovered automatically from `{issuer}/.well-known/openid-configuration`. The login flow uses the authorization code flow with PKCE. A "Sign in" button appears in the dashboard sidebar; sessions last 30 days and are persisted in `TRACKIO_DIR/auth/auth.db`, so they survive server restarts.
 
 ## Permissions
 
@@ -30,6 +30,8 @@ Two levels exist: **read** (view dashboards) and **write** (log metrics, upload 
 | `TRACKIO_OIDC_ALLOWED_GROUPS` | Groups allowed to sign in (OR-combined with `ALLOWED_USERS`). |
 | `TRACKIO_OIDC_WRITE_USERS` | Emails/usernames/subs granted write access. `*` = every signed-in user. |
 | `TRACKIO_OIDC_WRITE_GROUPS` | Groups granted write access. |
+| `TRACKIO_OIDC_ADMIN_USERS` | Emails/usernames/subs granted admin access (see [Admin page](#admin-page)). Admins always have write access and may sign in even when not in the allowed lists. |
+| `TRACKIO_OIDC_ADMIN_GROUPS` | Groups granted admin access. |
 | `TRACKIO_OIDC_GROUPS_CLAIM` | Claim that holds the user's groups (default `groups`). |
 | `TRACKIO_OIDC_SCOPES` | Requested scopes (default `openid profile email`). |
 
@@ -57,6 +59,22 @@ export TRACKIO_AUTH_REQUIRED=1
 ```
 
 Browser requests without a session are redirected to the sign-in flow; API requests receive `401`. Requests that carry a valid write token (`X-Trackio-Write-Token` header, cookie, or `?write_token=` query parameter) bypass the gate, so training scripts continue to work unchanged.
+
+## Admin page
+
+Admins see an **Admin** tab in the dashboard navbar showing:
+
+- Every user who has signed in via OIDC: name, email, resolved access level (admin / write / read-only), last login, login count, and active sessions.
+- Per user, the projects they have written to (metric logging, uploads, artifacts, run management), with first/last activity timestamps. High-frequency logging is aggregated to one count per minute per project.
+- Projects written by scripts using the server write token (these have no user identity).
+- A **Sign out** button per user that revokes all of that user's sessions immediately.
+
+Who is an admin:
+
+- Users/groups listed in `TRACKIO_OIDC_ADMIN_USERS` / `TRACKIO_OIDC_ADMIN_GROUPS`.
+- Anyone with the server write token (the write-access URL from `trackio.show()`), so the server owner always has access even before OIDC is configured.
+
+All of this data lives in `TRACKIO_DIR/auth/auth.db` and survives restarts. The underlying APIs are `admin_get_users` and `admin_revoke_user_sessions`.
 
 ## Other options
 
