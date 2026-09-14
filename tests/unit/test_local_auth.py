@@ -187,3 +187,22 @@ def test_admin_create_user_and_reset_password():
         server.admin_create_user(
             viewer_request, username="mallory", password="password456", role="admin"
         )
+
+
+def test_local_default_role_is_read_write():
+    local_auth.create_local_account("root", "password123", "admin")
+    local_auth.create_local_account("erin", "password123", "read")
+    auth_store.set_role_override("local:erin", None)
+
+    perms = oidc.refresh_user_permissions("local:erin")
+    assert perms == {"can_write": True, "is_admin": False}
+
+    client = _client()
+    resp = client.post(
+        "/login", data={"username": "erin", "password": "password123"}
+    )
+    assert resp.status_code == 302
+    request = Mock()
+    request.headers = {"cookie": _session_cookie(resp)}
+    session = oidc.get_oidc_session(request)
+    assert session.can_write and not session.is_admin

@@ -117,7 +117,7 @@ def create_local_account(
 def _login_local_user(request: Request, sub: str) -> Response:
     user = auth_store.get_user(sub)
     can_write, is_admin = oidc.apply_role_override(
-        False, False, user["role_override"] if user else None
+        True, False, user["role_override"] if user else None
     )
     session = oidc.OidcSession(
         sub=sub,

@@ -352,7 +352,7 @@ def refresh_user_permissions(sub: str) -> dict[str, bool] | None:
     if user is None:
         return None
     config = load_oidc_config()
-    if config is not None:
+    if config is not None and not auth_store.is_local_sub(sub):
         claims = {
             "sub": sub,
             "email": user["email"],
@@ -361,7 +361,7 @@ def refresh_user_permissions(sub: str) -> dict[str, bool] | None:
         }
         _, can_write, is_admin = evaluate_permissions(config, claims)
     else:
-        can_write = is_admin = False
+        can_write, is_admin = True, False
     can_write, is_admin = apply_role_override(
         can_write, is_admin, user["role_override"]
     )

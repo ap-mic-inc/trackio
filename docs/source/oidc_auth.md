@@ -46,7 +46,7 @@ Two levels exist: **read** (view dashboards) and **write** (log metrics, upload 
 | `TRACKIO_OIDC_GROUPS_CLAIM` | Claim that holds the user's groups (default `groups`). |
 | `TRACKIO_OIDC_SCOPES` | Requested scopes (default `openid profile email`). |
 
-If neither `TRACKIO_OIDC_WRITE_USERS` nor `TRACKIO_OIDC_WRITE_GROUPS` is set, every signed-in user gets write access. When they are set, other signed-in users are read-only. Matching is case-insensitive against the `email`, `preferred_username`, and `sub` claims.
+**The default is read-write**: when neither the write users nor write groups list is set, every signed-in user (OIDC or local) gets write access; a user's Role on the Admin page set to "default" likewise means read-write. Restrict writes by filling the write lists (other signed-in users become read-only) or by setting individual users' roles to read-only. Matching is case-insensitive against the `email`, `preferred_username`, and `sub` claims.
 
 Example — anyone in the company may view, only two people may write:
 

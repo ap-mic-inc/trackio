@@ -316,7 +316,7 @@
                     onclick={(e) => e.stopPropagation()}
                     onchange={(e) => changeRole(user.sub, e.target.value)}
                   >
-                    <option value="default">default (env)</option>
+                    <option value="default">default (write)</option>
                     <option value="admin">admin</option>
                     <option value="write">write</option>
                     <option value="read">read-only</option>
@@ -461,10 +461,10 @@
 
     <p class="hint">
       Activity timestamps are UTC. High-frequency logging is aggregated (one
-      count per minute per project). The Role column overrides the
-      <span class="mono">TRACKIO_OIDC_*</span> environment defaults and takes
-      effect immediately, including for active sessions; "default (env)"
-      falls back to the environment configuration.
+      count per minute per project). The Role column takes effect
+      immediately, including for active sessions. "default (write)" means
+      read-write access, or whatever the configured allowed/write lists
+      resolve to for OIDC users when those lists are set.
     </p>
   {/if}
 </div>
