@@ -216,6 +216,12 @@
     expandedRuns = { ...expandedRuns, [key]: !expandedRuns[key] };
   }
 
+  function handleCardClick(e, run) {
+    if (e.target.closest("button, a, input, select")) return;
+    if (window.getSelection()?.toString()) return;
+    openRunDetail(run.name, run.id);
+  }
+
   let orderedRuns = $derived.by(() => {
     if (!statusRuns) return [];
     return [...statusRuns].sort(
@@ -257,7 +263,12 @@
         {@const rate = stepsPerMin(run)}
         {@const others = otherMetrics(run)}
         {@const expanded = !!expandedRuns[runKey(run)]}
-        <article class="status-card" class:live={state === "training"}>
+        <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+        <article
+          class="status-card"
+          class:live={state === "training"}
+          onclick={(e) => handleCardClick(e, run)}
+        >
           <div class="status-line">
             <div class="status-name">
               <span class="run-dot" style:background={runColorMap[runKey(run)] ?? "#9ca3af"}></span>
@@ -361,6 +372,16 @@
     border-radius: 12px;
     padding: 18px 20px;
     background: var(--background-fill-primary, #fff);
+    cursor: pointer;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .status-card:hover {
+    border-color: color-mix(
+      in srgb,
+      var(--body-text-color, #1f2937) 20%,
+      var(--border-color-primary, #e5e7eb)
+    );
+    box-shadow: var(--shadow-drop-lg, 0 1px 3px 0 rgb(0 0 0 / 0.1));
   }
   .status-card.live {
     border-color: color-mix(in srgb, #10b981 45%, var(--border-color-primary, #e5e7eb));
