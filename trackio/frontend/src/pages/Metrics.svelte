@@ -82,6 +82,46 @@
       : histogramMetrics,
   );
 
+  let selectedGroup = $state("all");
+
+  function groupMetricCount(name) {
+    const g = metricGroups[name];
+    if (!g) return 0;
+    return (
+      g.direct.length +
+      Object.values(g.subgroups).reduce((n, arr) => n + arr.length, 0)
+    );
+  }
+
+  let visibleGroupNames = $derived(
+    selectedGroup === "all"
+      ? groupNames
+      : groupNames.filter((g) => g === selectedGroup),
+  );
+
+  let showHistogramSection = $derived(
+    filteredHistogramMetrics.length > 0 &&
+      (selectedGroup === "all" || selectedGroup === "histograms"),
+  );
+
+  let totalMetricCount = $derived(
+    groupNames.reduce((n, g) => n + groupMetricCount(g), 0) +
+      filteredHistogramMetrics.length,
+  );
+
+  let showGroupChips = $derived(
+    groupNames.length + (filteredHistogramMetrics.length > 0 ? 1 : 0) > 1,
+  );
+
+  $effect(() => {
+    if (selectedGroup === "all") return;
+    const stillExists =
+      selectedGroup === "histograms"
+        ? filteredHistogramMetrics.length > 0
+        : groupNames.includes(selectedGroup);
+    if (!stillExists) selectedGroup = "all";
+  });
+
   function getPlotResult(metric) {
     return computeMetricPlotData(masterData, xColumn, metric, xLim);
   }
@@ -371,7 +411,36 @@
     {#if showComparer}
       <RunComparer runs={selectedRuns} {runConfigs} {colorMap} />
     {/if}
-    {#each groupNames as groupName}
+    {#if showGroupChips}
+      <div class="group-chips" aria-label="Metric groups">
+        <button
+          class="group-chip"
+          class:active={selectedGroup === "all"}
+          onclick={() => (selectedGroup = "all")}
+        >
+          all <span class="chip-count">{totalMetricCount}</span>
+        </button>
+        {#each groupNames as g}
+          <button
+            class="group-chip"
+            class:active={selectedGroup === g}
+            onclick={() => (selectedGroup = g)}
+          >
+            {g} <span class="chip-count">{groupMetricCount(g)}</span>
+          </button>
+        {/each}
+        {#if filteredHistogramMetrics.length > 0}
+          <button
+            class="group-chip"
+            class:active={selectedGroup === "histograms"}
+            onclick={() => (selectedGroup = "histograms")}
+          >
+            histograms <span class="chip-count">{filteredHistogramMetrics.length}</span>
+          </button>
+        {/if}
+      </div>
+    {/if}
+    {#each visibleGroupNames as groupName}
       {@const group = metricGroups[groupName]}
       {@const directKey = `${groupName}:direct`}
       {@const orderedDirect = getOrderedMetrics(directKey, group.direct)}
@@ -490,7 +559,7 @@
       </Accordion>
     {/each}
 
-    {#if filteredHistogramMetrics.length > 0}
+    {#if showHistogramSection}
       <Accordion
         label="histograms ({filteredHistogramMetrics.length})"
         open={true}
@@ -525,9 +594,9 @@
     min-height: 0;
   }
   .plot-grid {
-    --plot-gap: 16px;
-    --plot-min-width: 300px;
-    --plot-max-cols: 4;
+    --plot-gap: 14px;
+    --plot-min-width: 280px;
+    --plot-max-cols: 5;
     display: grid;
     grid-template-columns: repeat(var(--cols, 1), minmax(0, 1fr));
     gap: var(--plot-gap);
@@ -554,6 +623,46 @@
   }
   .subgroup-list {
     margin-top: 16px;
+  }
+  .group-chips {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 0 0 14px;
+    padding: 8px 0;
+    background: var(--background-fill-primary, white);
+    box-shadow: 0 -28px 0 0 var(--background-fill-primary, white);
+  }
+  .group-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    border: 1px solid var(--border-color-primary, #e5e7eb);
+    border-radius: 999px;
+    background: var(--background-fill-primary, white);
+    color: var(--body-text-color-subdued, #6b7280);
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s, background-color 0.15s;
+  }
+  .group-chip:hover {
+    color: var(--body-text-color, #1f2937);
+  }
+  .group-chip.active {
+    border-color: var(--color-accent, #f97316);
+    background: var(--color-accent-soft, #fff7ed);
+    color: var(--body-text-color, #1f2937);
+  }
+  .chip-count {
+    font-size: 11px;
+    color: var(--body-text-color-subdued, #9ca3af);
+    font-variant-numeric: tabular-nums;
   }
   @media (max-width: 700px) {
     .metrics-page { padding: 20px 16px; }

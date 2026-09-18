@@ -514,7 +514,7 @@
             <div class="section">
               <Dropdown
                 label="Plots per row"
-                info="Auto fits plots to the available width, up to 4 per row."
+                info="Auto fits plots to the available width, up to 5 per row."
                 choices={PANELS_PER_ROW_CHOICES}
                 bind:value={panelsPerRow}
                 filterable={false}

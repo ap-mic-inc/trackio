@@ -85,7 +85,7 @@
     return {
       $schema: "https://vega.github.io/schema/vega-lite/v5.json",
       width: "container",
-      height: fullscreen ? "container" : 250,
+      height: fullscreen ? "container" : 220,
       autosize: { type: "fit", contains: "padding" },
       data: { values: barData },
       mark: {
