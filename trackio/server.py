@@ -1496,7 +1496,6 @@ def _auth_settings_payload() -> dict[str, Any]:
     payload: dict[str, Any] = {
         field: str(settings.get(field) or "") for field in _AUTH_SETTINGS_STRING_FIELDS
     }
-    payload["oidc_enabled"] = bool(settings.get("oidc_enabled"))
     payload["auth_required"] = bool(settings.get("auth_required"))
     payload["client_secret_set"] = bool(settings.get("client_secret"))
     payload["source"] = "db" if isinstance(stored, dict) else "env"
@@ -1515,9 +1514,10 @@ def admin_get_auth_settings(request: Request) -> dict[str, Any]:
 def admin_set_auth_settings(
     request: Request, settings: dict[str, Any]
 ) -> dict[str, Any]:
-    """Save OIDC/security settings from the Admin page. Saved settings take
-    precedence over environment variables. An empty client_secret keeps the
-    previously stored secret. Admin only."""
+    """Save OIDC/security settings from the Admin page. OIDC sign-in is
+    active whenever an issuer URL and client ID are saved; when both are
+    empty, TRACKIO_OIDC_* environment variables act as a fallback. An empty
+    client_secret keeps the previously stored secret. Admin only."""
     assert_is_admin(request)
     if not isinstance(settings, dict):
         raise TrackioAPIError("settings must be an object")
@@ -1529,11 +1529,10 @@ def admin_set_auth_settings(
     }
     secret = str(settings.get("client_secret") or "")
     new["client_secret"] = secret if secret else str(current.get("client_secret") or "")
-    new["oidc_enabled"] = bool(settings.get("oidc_enabled"))
     new["auth_required"] = bool(settings.get("auth_required"))
-    if new["oidc_enabled"] and (not new["issuer"] or not new["client_id"]):
+    if bool(new["issuer"]) != bool(new["client_id"]):
         raise TrackioAPIError(
-            "Enabling OIDC requires both an issuer URL and a client ID."
+            "OIDC sign-in requires both an issuer URL and a client ID."
         )
     auth_store.set_setting(oidc.AUTH_SETTINGS_KEY, new)
     return _auth_settings_payload()

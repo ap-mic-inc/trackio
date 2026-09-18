@@ -109,8 +109,6 @@ def _cookie_secure_env() -> bool | None:
 
 
 def _config_from_settings(settings: dict[str, Any]) -> OidcConfig | None:
-    if not settings.get("oidc_enabled"):
-        return None
     issuer = str(settings.get("issuer") or "").strip().rstrip("/")
     client_id = str(settings.get("client_id") or "").strip()
     if not issuer or not client_id:
@@ -163,13 +161,16 @@ def _config_from_env() -> OidcConfig | None:
 def load_oidc_config() -> OidcConfig | None:
     """Resolve the OIDC configuration.
 
-    Settings saved from the Admin page (stored in the auth database) take
-    precedence; environment variables act only as a fallback for servers
-    that have never saved settings from the UI.
+    OIDC is considered configured (and therefore enabled) whenever an issuer
+    URL and a client ID are available. Settings saved from the Admin page
+    (stored in the auth database) take precedence; environment variables are
+    used when the saved settings do not name an identity provider.
     """
     settings = auth_store.get_setting(AUTH_SETTINGS_KEY)
     if isinstance(settings, dict):
-        return _config_from_settings(settings)
+        config = _config_from_settings(settings)
+        if config is not None:
+            return config
     return _config_from_env()
 
 

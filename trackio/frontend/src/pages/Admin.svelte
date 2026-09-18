@@ -384,22 +384,22 @@
         <summary>Authentication settings <span class="summary-hint">OIDC and dashboard sign-in</span></summary>
         <div class="auth-content">
         <p class="muted">
-          OIDC sign-in becomes available on the login page once enabled and
-          saved here. Saved settings take precedence over
-          <span class="mono">TRACKIO_OIDC_*</span> environment variables
+          OIDC sign-in becomes available on the login page as soon as an
+          issuer URL and client ID are saved here. Saved settings take
+          precedence over <span class="mono">TRACKIO_OIDC_*</span> environment
+          variables, which act as a fallback while these fields are empty
           {#if authSettings.source === "env"}(currently using environment
           fallback){/if}.
         </p>
         <form class="settings-form" onsubmit={saveAuthSettings}>
-          <label class="toggle">
-            <input type="checkbox" bind:checked={authSettings.oidc_enabled} />
-            Enable OIDC sign-in
+          <p class="oidc-status">
+            OIDC sign-in is
             {#if authSettings.oidc_active}
               <span class="badge badge-write">active</span>
             {:else}
               <span class="badge badge-read">inactive</span>
             {/if}
-          </label>
+          </p>
           <fieldset>
             <legend>Identity provider</legend>
             <div class="settings-grid">
@@ -532,6 +532,8 @@
   legend { padding: 0; margin-bottom: 12px; font-weight: 600; }
   .settings-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
   .settings-grid label, .create-form label { display: flex; flex-direction: column; gap: 7px; min-width: 0; font-size: 12px; font-weight: 500; }
+  .oidc-status { display: flex; align-items: center; gap: 10px; margin: 0; padding: 12px 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--subtle); font-size: 13px; }
+  .oidc-status .badge { margin-left: auto; }
   .toggle { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--subtle); cursor: pointer; }
   .toggle input { width: 16px; height: 16px; flex-shrink: 0; accent-color: var(--color-accent, #f97316); }
   .toggle .badge { margin-left: auto; }

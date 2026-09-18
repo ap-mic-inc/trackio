@@ -594,14 +594,9 @@ def test_db_settings_take_precedence_over_env(monkeypatch):
     _configure(monkeypatch)
     assert oidc.load_oidc_config() is not None
 
-    auth_store.set_setting(oidc.AUTH_SETTINGS_KEY, {"oidc_enabled": False})
-    assert oidc.load_oidc_config() is None
-    assert not oidc.oidc_enabled()
-
     auth_store.set_setting(
         oidc.AUTH_SETTINGS_KEY,
         {
-            "oidc_enabled": True,
             "issuer": "https://db-idp.example.com/",
             "client_id": "db-client",
             "client_secret": "db-secret",
@@ -616,14 +611,32 @@ def test_db_settings_take_precedence_over_env(monkeypatch):
     assert not config.write_open_to_all
 
 
-def test_db_settings_require_issuer_and_client():
+def test_env_fallback_when_db_settings_lack_issuer(monkeypatch):
+    _configure(monkeypatch)
+    auth_store.set_setting(oidc.AUTH_SETTINGS_KEY, {"auth_required": True})
+    config = oidc.load_oidc_config()
+    assert config is not None
+    assert config.issuer == "https://idp.example.com"
+
+
+def test_saved_config_enables_oidc_without_legacy_flag():
     auth_store.set_setting(
-        oidc.AUTH_SETTINGS_KEY, {"oidc_enabled": True, "issuer": "", "client_id": "x"}
+        oidc.AUTH_SETTINGS_KEY,
+        {
+            "oidc_enabled": False,
+            "issuer": "https://db-idp.example.com",
+            "client_id": "db-client",
+        },
     )
+    assert oidc.oidc_enabled()
+
+
+def test_db_settings_require_issuer_and_client():
+    auth_store.set_setting(oidc.AUTH_SETTINGS_KEY, {"issuer": "", "client_id": "x"})
     assert oidc.load_oidc_config() is None
     auth_store.set_setting(
         oidc.AUTH_SETTINGS_KEY,
-        {"oidc_enabled": True, "issuer": "https://x", "client_id": ""},
+        {"issuer": "https://x", "client_id": ""},
     )
     assert oidc.load_oidc_config() is None
 
@@ -646,17 +659,16 @@ def test_admin_auth_settings_api():
 
     payload = server.admin_get_auth_settings(request)
     assert payload["source"] == "env"
-    assert payload["oidc_enabled"] is False
+    assert payload["oidc_active"] is False
 
     with pytest.raises(TrackioAPIError):
         server.admin_set_auth_settings(
-            request, {"oidc_enabled": True, "issuer": "", "client_id": ""}
+            request, {"issuer": "https://idp.example.com", "client_id": ""}
         )
 
     payload = server.admin_set_auth_settings(
         request,
         {
-            "oidc_enabled": True,
             "issuer": "https://idp.example.com",
             "client_id": "trackio",
             "client_secret": "topsecret",
@@ -672,7 +684,6 @@ def test_admin_auth_settings_api():
     payload = server.admin_set_auth_settings(
         request,
         {
-            "oidc_enabled": True,
             "issuer": "https://idp.example.com",
             "client_id": "trackio",
             "client_secret": "",
