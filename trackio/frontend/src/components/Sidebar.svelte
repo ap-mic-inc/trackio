@@ -79,10 +79,19 @@
   });
 
 
-  let availableXAxes = $derived.by(() => {
-    let axes = ["step", "time", ...metricColumns];
-    return axes;
-  });
+  const COMMON_X_AXES = [
+    { value: "step", label: "Step" },
+    { value: "time", label: "Time" },
+  ];
+
+  let metricAxisSelection = $derived(
+    metricColumns.includes(xAxis) ? xAxis : "",
+  );
+
+  function handleMetricAxisChange(e) {
+    const value = e.target.value;
+    if (value) xAxis = value;
+  }
 
   function setIndeterminate(node, value) {
     node.indeterminate = value;
@@ -523,12 +532,32 @@
           {/if}
 
           <div class="section">
-            <Dropdown
-              label="X-axis"
-              choices={availableXAxes}
-              bind:value={xAxis}
-              filterable={false}
-            />
+            <span class="section-label">X-axis</span>
+            <div class="xaxis-row">
+              {#each COMMON_X_AXES as axis}
+                <button
+                  class="xaxis-tab"
+                  class:active={xAxis === axis.value}
+                  onclick={() => (xAxis = axis.value)}
+                >
+                  {axis.label}
+                </button>
+              {/each}
+              {#if metricColumns.length > 0}
+                <select
+                  class="xaxis-metric"
+                  class:active={metricAxisSelection !== ""}
+                  value={metricAxisSelection}
+                  onchange={handleMetricAxisChange}
+                  aria-label="Use a logged metric as the X-axis"
+                >
+                  <option value="" disabled>Metric…</option>
+                  {#each metricColumns as m}
+                    <option value={m}>{m}</option>
+                  {/each}
+                </select>
+              {/if}
+            </div>
             <GradioCheckbox
               label="Log scale X-axis"
               bind:checked={logScaleX}
@@ -720,6 +749,52 @@
   .section {
     margin-top: 2px;
     margin-bottom: 18px;
+  }
+  .xaxis-row {
+    display: flex;
+    align-items: stretch;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin: 8px 0 10px;
+  }
+  .xaxis-tab {
+    padding: 5px 16px;
+    border: 1px solid var(--border-color-primary, #e5e7eb);
+    border-radius: var(--radius-md, 6px);
+    background: var(--input-background-fill, white);
+    color: var(--body-text-color-subdued, #6b7280);
+    font-size: 12.5px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s, background-color 0.15s;
+  }
+  .xaxis-tab:hover {
+    color: var(--body-text-color, #1f2937);
+  }
+  .xaxis-tab.active {
+    border-color: var(--color-accent, #f97316);
+    background: var(--color-accent-soft, #fff7ed);
+    color: var(--body-text-color, #1f2937);
+    font-weight: 600;
+  }
+  .xaxis-metric {
+    flex: 1 1 90px;
+    min-width: 0;
+    max-width: 100%;
+    padding: 5px 8px;
+    border: 1px solid var(--border-color-primary, #e5e7eb);
+    border-radius: var(--radius-md, 6px);
+    background: var(--input-background-fill, white);
+    color: var(--body-text-color-subdued, #6b7280);
+    font: inherit;
+    font-size: 12.5px;
+    cursor: pointer;
+  }
+  .xaxis-metric.active {
+    border-color: var(--color-accent, #f97316);
+    background: var(--color-accent-soft, #fff7ed);
+    color: var(--body-text-color, #1f2937);
+    font-weight: 600;
   }
   .share-tabs {
     display: flex;
