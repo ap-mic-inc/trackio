@@ -1,7 +1,6 @@
 <script>
   import { onMount, tick } from "svelte";
-  import embed from "vega-embed";
-  import * as vega from "vega";
+  import { loadVega, getVega } from "../lib/vegaLoader.js";
   import { buildColorSpecKey } from "../lib/dataProcessing.js";
   import { visibleLegendEntries } from "../lib/legend.js";
   import { escapeVegaField } from "../lib/vega.js";
@@ -320,6 +319,7 @@
   }
 
   function replaceDataset(v, name, newData) {
+    const { vega } = getVega();
     const cs = vega.changeset().remove(vega.truthy).insert(newData);
     v.change(name, cs);
   }
@@ -361,6 +361,7 @@
     const spec = buildSpec();
 
     try {
+      const { embed } = await loadVega();
       if (view) {
         view.finalize();
         view = null;

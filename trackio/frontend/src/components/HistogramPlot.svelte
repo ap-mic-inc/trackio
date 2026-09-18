@@ -1,6 +1,6 @@
 <script>
   import { onMount, tick } from "svelte";
-  import embed from "vega-embed";
+  import { loadVega } from "../lib/vegaLoader.js";
 
   let {
     items = [],
@@ -151,6 +151,7 @@
         view.finalize();
         view = null;
       }
+      const { embed } = await loadVega();
       const result = await embed(container, spec, {
         actions: false,
         renderer: "canvas",
