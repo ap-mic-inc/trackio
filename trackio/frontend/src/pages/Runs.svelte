@@ -1,5 +1,6 @@
 <script>
   import PageHeader from "../components/PageHeader.svelte";
+  import CodeSnippet from "../components/CodeSnippet.svelte";
   import { tick } from "svelte";
   import LoadingTrackio from "../components/LoadingTrackio.svelte";
   import {
@@ -163,7 +164,9 @@
     <div class="empty-state">
       <h2>No runs in this project</h2>
       <p>Runs are created when you call <code>trackio.init()</code> and log at least one step. Example:</p>
-      <pre><code>{'import trackio\ntrackio.init(project="my-project")\nfor i in range(10):\n    trackio.log({"loss": 1 / (i + 1)})\ntrackio.finish()'}</code></pre>
+      <CodeSnippet
+        code={`import trackio\n\ntrackio.init(project="${project || "my-project"}")\nfor i in range(10):\n    trackio.log({"loss": 1 / (i + 1)})\ntrackio.finish()`}
+      />
       <p>Refresh this page or wait for the dashboard to poll; new runs appear in the table with step counts.</p>
     </div>
   {:else}

@@ -1,5 +1,6 @@
 <script>
   import PageHeader from "../components/PageHeader.svelte";
+  import CodeSnippet from "../components/CodeSnippet.svelte";
   import { copyTextToClipboard } from "../lib/clipboard.js";
   import {
     getThemePreference,
@@ -25,6 +26,42 @@
   let agentInstallCmd = $derived(
     `trackio skills add ${agents.find((a) => a.id === selectedAgent)?.flag}`
   );
+
+  const quickstarts = [
+    { id: "log", label: "Log metrics" },
+    { id: "wandb", label: "Migrate from wandb" },
+    { id: "resume", label: "Resume a run" },
+  ];
+  let selectedQuickstart = $state("log");
+
+  let quickstartCode = $derived.by(() => {
+    const proj = cliProject || "my-project";
+    const snippets = {
+      log: `import trackio
+
+trackio.init(
+    project="${proj}",
+    name="my-run",
+    config={"learning_rate": 1e-3, "epochs": 10},
+)
+
+for step in range(100):
+    trackio.log({"train/loss": 1 / (step + 1)})
+
+trackio.finish()`,
+      wandb: `import trackio as wandb
+
+wandb.init(project="${proj}", config={"learning_rate": 1e-3})
+wandb.log({"train/loss": 0.42})
+wandb.finish()`,
+      resume: `import trackio
+
+trackio.init(project="${proj}", name="my-run", resume="allow")
+trackio.log({"train/loss": 0.05})
+trackio.finish()`,
+    };
+    return snippets[selectedQuickstart];
+  });
 
   let agentExample = $derived.by(() => {
     const proj = cliProject || "<project>";
@@ -195,6 +232,32 @@
     </div>
 
     <div class="col col-right">
+      <section class="settings-section">
+        <h3 class="section-title">Python Quickstart</h3>
+        <p class="section-desc">Copy-paste snippets for logging from your training script.</p>
+        <div class="agent-tabs">
+          {#each quickstarts as q}
+            <button
+              class="agent-tab"
+              class:active={selectedQuickstart === q.id}
+              onclick={() => { selectedQuickstart = q.id; }}
+            >
+              {q.label}
+            </button>
+          {/each}
+        </div>
+        <CodeSnippet code={quickstartCode} />
+        {#if selectedQuickstart === "wandb"}
+          <p class="quickstart-hint">
+            Trackio is a drop-in replacement for <code>wandb</code>: change the import and keep the rest of your script.
+          </p>
+        {:else if selectedQuickstart === "resume"}
+          <p class="quickstart-hint">
+            <code>resume</code> accepts <code>"never"</code> (default), <code>"allow"</code>, or <code>"must"</code>.
+          </p>
+        {/if}
+      </section>
+
       <section class="settings-section">
         <h3 class="section-title">Agent Skills</h3>
         <p class="section-desc">Install Trackio as a skill in your AI coding agent to query experiments with natural language.</p>
@@ -520,6 +583,18 @@
     color: var(--body-text-color, #1f2937);
     line-height: 1.6;
     font-style: italic;
+  }
+  .quickstart-hint {
+    margin: 10px 0 0;
+    font-size: var(--text-sm, 12px);
+    color: var(--body-text-color-subdued, #6b7280);
+    line-height: 1.6;
+  }
+  .quickstart-hint code {
+    font-size: 11px;
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: var(--background-fill-secondary, #f9fafb);
   }
   @media (max-width: 700px) {
     .settings-page { padding: 20px 16px; }

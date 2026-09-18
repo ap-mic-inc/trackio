@@ -1,5 +1,6 @@
 <script>
   import PageHeader from "../components/PageHeader.svelte";
+  import CodeSnippet from "../components/CodeSnippet.svelte";
   import LoadingTrackio from "../components/LoadingTrackio.svelte";
   import Object3DCard from "../components/Object3DCard.svelte";
   import Object3DModal from "../components/Object3DModal.svelte";
@@ -344,11 +345,15 @@
       {:else if selectedRuns.length === 0}
         <h2>No runs selected</h2>
         <p>Select runs in the sidebar to browse media and tables.</p>
-        <pre><code>{'import trackio\ntrackio.init(project="my-project")\ntrackio.log({"loss": 0.5})\ntrackio.finish()'}</code></pre>
+        <CodeSnippet
+          code={`import trackio\n\ntrackio.init(project="${project || "my-project"}")\ntrackio.log({"loss": 0.5})\ntrackio.finish()`}
+        />
       {:else}
         <h2>No media or tables in this run</h2>
         <p>Log images, video, audio, 3D objects, and tables by passing Trackio objects to <code>trackio.log()</code>:</p>
-        <pre><code>{'import trackio\n\ntrackio.init(project="my-project")\ntrackio.log({"plot": trackio.Image("figure.png")})\ntrackio.log({"clip": trackio.Video("output.mp4")})\ntrackio.log({"audio": trackio.Audio("speech.wav")})\ntrackio.log({"model": trackio.Object3D("scene.glb")})\ntrackio.log({"report": trackio.Html("<h1>Results</h1>")})\n\nimport pandas as pd\ndf = pd.DataFrame({"epoch": [0, 1], "acc": [0.9, 0.95]})\ntrackio.log({"samples": trackio.Table(dataframe=df)})'}</code></pre>
+        <CodeSnippet
+          code={`import trackio\n\ntrackio.init(project="${project || "my-project"}")\ntrackio.log({"plot": trackio.Image("figure.png")})\ntrackio.log({"clip": trackio.Video("output.mp4")})\ntrackio.log({"audio": trackio.Audio("speech.wav")})\ntrackio.log({"model": trackio.Object3D("scene.glb")})\ntrackio.log({"report": trackio.Html("<h1>Results</h1>")})\n\nimport pandas as pd\ndf = pd.DataFrame({"epoch": [0, 1], "acc": [0.9, 0.95]})\ntrackio.log({"samples": trackio.Table(dataframe=df)})`}
+        />
         <p>Each type appears in its own section here once logged.</p>
       {/if}
     </div>

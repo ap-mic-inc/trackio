@@ -1,5 +1,6 @@
 <script>
   import LoadingTrackio from "../components/LoadingTrackio.svelte";
+  import CodeSnippet from "../components/CodeSnippet.svelte";
   import ArtifactVersionDetail from "../components/ArtifactVersionDetail.svelte";
   import { getRunSummary, getRunArtifacts } from "../lib/api.js";
   import {
@@ -135,7 +136,9 @@
         Choose a run from the <strong>Runs</strong> page or follow a run name from the sidebar. This view shows the
         project name, log count, last step, metric keys, and any logged config.
       </p>
-      <pre><code>{'import trackio\ntrackio.init(project="my-project", config={"lr": 1e-3})\ntrackio.log({"loss": 0.5})\ntrackio.finish()'}</code></pre>
+      <CodeSnippet
+        code={`import trackio\n\ntrackio.init(project="${project || "my-project"}", config={"lr": 1e-3})\ntrackio.log({"loss": 0.5})\ntrackio.finish()`}
+      />
       <p>Config passed to <code>trackio.init()</code> appears under Configuration when present.</p>
     </div>
   {:else}

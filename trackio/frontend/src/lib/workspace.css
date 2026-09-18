@@ -21,7 +21,7 @@
   margin: 10px 0;
   color: var(--body-text-color-subdued, #6b7280);
 }
-.workspace-page .empty-state pre {
+.workspace-page .empty-state > pre {
   margin: 16px 0;
   padding: 16px;
   overflow-x: auto;

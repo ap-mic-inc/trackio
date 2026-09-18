@@ -1,5 +1,6 @@
 <script>
   import PageHeader from "../components/PageHeader.svelte";
+  import CodeSnippet from "../components/CodeSnippet.svelte";
   import { onMount } from "svelte";
   import { getQueryParam } from "../lib/router.js";
   import LinePlot from "../components/LinePlot.svelte";
@@ -344,8 +345,11 @@
     <div class="empty-state">
       <h2>No projects</h2>
       <p>
-        Create a project by calling <code>trackio.init(project="…")</code> in your training script.
+        Create a project by calling <code>trackio.init(project="…")</code> in your training script:
       </p>
+      <CodeSnippet
+        code={'import trackio\n\ntrackio.init(project="my-project")\nfor i in range(10):\n    trackio.log({"loss": 1 / (i + 1)})\ntrackio.finish()'}
+      />
     </div>
   {:else if selectedRuns.length === 0}
     <div class="empty-state">
@@ -355,12 +359,13 @@
   {:else if masterData.length === 0}
     <div class="empty-state">
       <h2>Start logging with Trackio</h2>
-      <p>You can create a new project by calling <code>trackio.init()</code>:</p>
-      <pre><code>{'import trackio\ntrackio.init(project="my-project")'}</code></pre>
-      <p>Then call <code>trackio.log()</code> to log metrics:</p>
-      <pre><code>{'for i in range(10):\n    trackio.log({"loss": 1/(i+1)})'}</code></pre>
-      <p>Finally, call <code>trackio.finish()</code> to finish the run:</p>
-      <pre><code>{'trackio.finish()'}</code></pre>
+      <p>
+        Call <code>trackio.init()</code> to create a run, <code>trackio.log()</code> to log metrics,
+        and <code>trackio.finish()</code> when the run is done:
+      </p>
+      <CodeSnippet
+        code={`import trackio\n\ntrackio.init(project="${project}")\nfor i in range(10):\n    trackio.log({"loss": 1 / (i + 1)})\ntrackio.finish()`}
+      />
     </div>
   {:else}
     {#if showComparer}

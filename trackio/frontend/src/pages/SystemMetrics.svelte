@@ -1,5 +1,6 @@
 <script>
   import PageHeader from "../components/PageHeader.svelte";
+  import CodeSnippet from "../components/CodeSnippet.svelte";
   import { onMount } from "svelte";
   import LinePlot from "../components/LinePlot.svelte";
   import Accordion from "../components/Accordion.svelte";
@@ -511,7 +512,9 @@
     <div class="empty-state">
       <h2>No System Metrics Available</h2>
       <p>System metrics will appear here once logged. To enable automatic logging:</p>
-      <pre><code>{'import trackio\n\n# CPU/system metrics auto-enable when psutil is installed:\nrun = trackio.init(project="my-project")\n\n# Or explicitly enable/disable them:\nrun = trackio.init(project="my-project", auto_log_cpu=True)\n\n# Manually log at any time:\ntrackio.log_cpu()\ntrackio.log_gpu()'}</code></pre>
+      <CodeSnippet
+        code={`import trackio\n\n# CPU/system metrics auto-enable when psutil is installed:\nrun = trackio.init(project="${project || "my-project"}")\n\n# Or explicitly enable/disable them:\nrun = trackio.init(project="${project || "my-project"}", auto_log_cpu=True)\n\n# Manually log at any time:\ntrackio.log_cpu()\ntrackio.log_gpu()`}
+      />
       <p><strong>Setup:</strong></p>
       <ul>
         <li><strong>CPU/system metrics:</strong> <code>pip install trackio[cpu]</code> (requires <code>psutil</code>)</li>

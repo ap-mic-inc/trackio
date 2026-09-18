@@ -1,5 +1,6 @@
 <script>
   import PageHeader from "../components/PageHeader.svelte";
+  import CodeSnippet from "../components/CodeSnippet.svelte";
   import LoadingTrackio from "../components/LoadingTrackio.svelte";
   import { getFileUrl, getProjectFiles } from "../lib/api.js";
   import { formatSize } from "../lib/format.js";
@@ -80,7 +81,9 @@
         Files are stored at the <strong>project</strong> level (not tied to a single run). After
         <code>trackio.init()</code>, copy artifacts into the project with <code>trackio.save()</code>:
       </p>
-      <pre><code>{'import trackio\n\ntrackio.init(project="my-project")\ntrackio.save("config.yaml")\ntrackio.save("checkpoints/*.pt")'}</code></pre>
+      <CodeSnippet
+        code={`import trackio\n\ntrackio.init(project="${project || "my-project"}")\ntrackio.save("config.yaml")\ntrackio.save("checkpoints/*.pt")`}
+      />
       <p>Paths can be a single file or a glob. Saved files will list here for download.</p>
     </div>
   {:else}

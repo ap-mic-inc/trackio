@@ -1,5 +1,6 @@
 <script>
   import PageHeader from "../components/PageHeader.svelte";
+  import CodeSnippet from "../components/CodeSnippet.svelte";
   import LoadingTrackio from "../components/LoadingTrackio.svelte";
   import { getProjectSummary, getLogsBatch } from "../lib/api.js";
   import { buildColorMap } from "../lib/stores.js";
@@ -237,7 +238,9 @@
     <div class="empty-state">
       <h2>No runs in this project</h2>
       <p>Runs appear here as soon as you call <code>trackio.init()</code> and log a step:</p>
-      <pre><code>{'import trackio\ntrackio.init(project="my-project")\nfor i in range(10):\n    trackio.log({"loss": 1 / (i + 1)})\ntrackio.finish()'}</code></pre>
+      <CodeSnippet
+        code={`import trackio\n\ntrackio.init(project="${project || "my-project"}")\nfor i in range(10):\n    trackio.log({"loss": 1 / (i + 1)})\ntrackio.finish()`}
+      />
     </div>
   {:else}
     {#if liveCount > 0}
