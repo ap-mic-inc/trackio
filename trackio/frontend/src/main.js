@@ -1,4 +1,5 @@
 import "./lib/gradio-theme.css";
+import "./lib/workspace.css";
 import App from "./App.svelte";
 import RegistryApp from "./RegistryApp.svelte";
 import { mount } from "svelte";

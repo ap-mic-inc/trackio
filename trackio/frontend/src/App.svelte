@@ -4,6 +4,7 @@
   import Sidebar from "./components/Sidebar.svelte";
   import AlertPanel from "./components/AlertPanel.svelte";
   import Metrics from "./pages/Metrics.svelte";
+  import Overview from "./pages/Overview.svelte";
   import Traces from "./pages/Traces.svelte";
   import SystemMetrics from "./pages/SystemMetrics.svelte";
   import Media from "./pages/Media.svelte";
@@ -572,6 +573,7 @@
   });
 
   let showSidebar = $derived(
+    currentPage === "overview" ||
     currentPage === "metrics" ||
       currentPage === "traces" ||
       currentPage === "system" ||
@@ -583,7 +585,9 @@
   );
 
   let sidebarVariant = $derived(
-    currentPage === "runs" || currentPage === "files" ? "compact" : "full"
+    currentPage === "runs" || currentPage === "files" || currentPage === "overview"
+      ? "compact"
+      : "full"
   );
 
   function markSidebarUserControlled() {
@@ -657,7 +661,9 @@
     {/if}
 
     <div class="page-content">
-      {#if currentPage === "metrics"}
+      {#if currentPage === "overview"}
+        <Overview project={selectedProject} {runs} />
+      {:else if currentPage === "metrics"}
         <Metrics
           project={selectedProject}
           selectedRuns={selectedRunRecords}

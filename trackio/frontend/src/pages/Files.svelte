@@ -1,4 +1,5 @@
 <script>
+  import PageHeader from "../components/PageHeader.svelte";
   import LoadingTrackio from "../components/LoadingTrackio.svelte";
   import { getFileUrl, getProjectFiles } from "../lib/api.js";
   import { formatSize } from "../lib/format.js";
@@ -68,7 +69,8 @@
   });
 </script>
 
-<div class="files-page">
+<div class="files-page workspace-page">
+  <PageHeader title="Files" description="Browse, preview, and download files saved across this project." count={loading ? null : files.length} />
   {#if loading}
     <LoadingTrackio />
   {:else if files.length === 0}
@@ -82,13 +84,11 @@
       <p>Paths can be a single file or a glob. Saved files will list here for download.</p>
     </div>
   {:else}
-    <h2 class="page-title">Files</h2>
-    <p class="page-subtitle">Showing files saved across all runs in this project.</p>
     <div class="file-list">
       {#each files as file}
         <div class="file-item" class:expanded={expandedFile === file.name}>
           <div class="file-row">
-            <button class="file-name" onclick={() => togglePreview(file)}>
+            <button class="file-name" aria-expanded={expandedFile === file.name} onclick={() => togglePreview(file)}>
               <span class="file-icon">{isPreviewable(file.name) ? "📄" : "📦"}</span>
               {file.name}
             </button>
@@ -96,7 +96,7 @@
               {#if file.size != null}
                 <span class="file-size">{formatSize(file.size)}</span>
               {/if}
-              <a class="download-btn" href={getFileUrl(file.path)} download title="Download">
+              <a class="download-btn" href={getFileUrl(file.path)} download title="Download" aria-label={`Download ${file.name}`}>
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
                   <path d="M8 1v9m0 0L5 7m3 3l3-3M2 12v1a2 2 0 002 2h8a2 2 0 002-2v-1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
@@ -124,25 +124,16 @@
 
 <style>
   .files-page {
-    padding: 20px 24px;
+    min-width: 0;
+    box-sizing: border-box;
+    padding: 28px;
     overflow-y: auto;
     flex: 1;
-  }
-  .page-title {
-    color: var(--body-text-color, #1f2937);
-    font-size: 16px;
-    font-weight: 700;
-    margin: 0 0 4px;
-  }
-  .page-subtitle {
-    color: var(--body-text-color-subdued, #6b7280);
-    font-size: var(--text-sm, 12px);
-    margin: 0 0 16px;
   }
   .file-list {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 10px;
   }
   .file-item {
     border: 1px solid var(--border-color-primary, #e5e7eb);
@@ -161,6 +152,9 @@
     gap: 12px;
   }
   .file-name {
+    min-width: 0;
+    text-align: left;
+    overflow-wrap: anywhere;
     display: flex;
     align-items: center;
     gap: 8px;
@@ -180,6 +174,7 @@
     flex-shrink: 0;
   }
   .file-actions {
+    flex-shrink: 0;
     display: flex;
     align-items: center;
     gap: 12px;
@@ -236,36 +231,7 @@
   .preview-unavailable a:hover {
     text-decoration: underline;
   }
-  .empty-state {
-    max-width: 640px;
-    padding: 40px 24px;
-    color: var(--body-text-color, #1f2937);
-  }
-  .empty-state h2 {
-    margin: 0 0 8px;
-    font-size: 20px;
-    font-weight: 700;
-  }
-  .empty-state p {
-    margin: 12px 0 8px;
-    color: var(--body-text-color-subdued, #6b7280);
-  }
-  .empty-state pre {
-    background: var(--background-fill-secondary, #f9fafb);
-    padding: 16px;
-    border-radius: var(--radius-lg, 8px);
-    border: 1px solid var(--border-color-primary, #e5e7eb);
-    font-size: 13px;
-    overflow-x: auto;
-  }
-  .empty-state code {
-    background: var(--background-fill-secondary, #f0f0f0);
-    padding: 1px 5px;
-    border-radius: var(--radius-sm, 4px);
-    font-size: 13px;
-  }
-  .empty-state pre code {
-    background: none;
-    padding: 0;
+  @media (max-width: 700px) {
+    .files-page { padding: 20px 16px; }
   }
 </style>

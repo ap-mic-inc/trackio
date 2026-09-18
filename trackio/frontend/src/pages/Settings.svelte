@@ -1,4 +1,5 @@
 <script>
+  import PageHeader from "../components/PageHeader.svelte";
   import { copyTextToClipboard } from "../lib/clipboard.js";
   import {
     getThemePreference,
@@ -93,8 +94,8 @@
   }
 </script>
 
-<div class="settings-page">
-  <h2 class="page-title">Settings</h2>
+<div class="settings-page workspace-page">
+  <PageHeader title="Settings" description="Customize your workspace and connect your development tools." />
 
   <div class="two-col">
     <div class="col col-left">
@@ -266,29 +267,30 @@
 
 <style>
   .settings-page {
-    padding: 24px 32px;
+    min-width: 0;
+    box-sizing: border-box;
+    padding: 28px;
     overflow-y: auto;
     flex: 1;
-  }
-  .page-title {
-    color: var(--body-text-color, #1f2937);
-    font-size: 18px;
-    font-weight: 700;
-    margin: 0 0 24px;
   }
   .two-col {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 32px;
+    gap: 24px;
     align-items: start;
   }
   @media (max-width: 900px) {
     .two-col {
-      grid-template-columns: 1fr;
+      grid-template-columns: minmax(0, 1fr);
     }
   }
+  .col { min-width: 0; }
   .settings-section {
-    margin-bottom: 32px;
+    margin-bottom: 24px;
+    padding: 22px;
+    border: 1px solid var(--border-color-primary, #e5e7eb);
+    border-radius: 12px;
+    background: var(--background-fill-primary, white);
   }
   .section-title {
     color: var(--body-text-color, #1f2937);
@@ -430,6 +432,7 @@
   }
 
   .agent-tabs {
+    overflow-x: auto;
     display: flex;
     border-bottom: 1px solid var(--border-color-primary, #e5e7eb);
     gap: 0;
@@ -517,5 +520,18 @@
     color: var(--body-text-color, #1f2937);
     line-height: 1.6;
     font-style: italic;
+  }
+  @media (max-width: 700px) {
+    .settings-page { padding: 20px 16px; }
+    .settings-section { padding: 18px; }
+    .theme-switcher { display: flex; }
+    .theme-option { flex: 1; justify-content: center; padding: 8px; }
+    .project-selector { flex-wrap: wrap; }
+    .selector-select { min-width: 0; max-width: 100%; }
+    .command-row { flex-direction: column; align-items: stretch; gap: 6px; }
+    .command-label { width: auto; }
+    .command-value code { white-space: normal; overflow-wrap: anywhere; }
+    .agent-tab { padding: 8px 12px; }
+
   }
 </style>

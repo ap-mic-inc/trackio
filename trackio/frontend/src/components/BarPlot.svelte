@@ -541,8 +541,8 @@
   }
   .drag-handle {
     position: absolute;
-    top: 8px;
-    left: 8px;
+    top: 13px;
+    left: 3px;
     color: var(--body-text-color-subdued, #9ca3af);
     opacity: 0;
     transition: opacity 0.15s;
@@ -593,15 +593,18 @@
     flex-direction: column;
   }
   .plot-title {
-    font-size: 13px;
+    font-size: 12.5px;
     font-weight: 600;
+    letter-spacing: -0.01em;
     color: var(--body-text-color, #374151);
-    text-align: center;
-    padding: 0 0 6px;
+    text-align: left;
+    padding: 2px 96px 10px 18px;
     word-break: break-word;
   }
   .plot-title--fs {
     flex-shrink: 0;
+    text-align: center;
+    padding: 0 0 6px;
   }
   .plot {
     width: 100%;
@@ -675,6 +678,16 @@
     gap: 12px;
     padding: 6px 0 0;
     flex-wrap: wrap;
+  }
+  .plot-container .custom-legend {
+    justify-content: flex-start;
+    padding: 8px 6px 0 18px;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+  .plot-container:hover .custom-legend,
+  .plot-container:focus-within .custom-legend {
+    opacity: 1;
   }
   .legend-item {
     display: flex;

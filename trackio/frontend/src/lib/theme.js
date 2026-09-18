@@ -29,6 +29,7 @@ const darkOverrides = {
 
   "--background-fill-primary": "#0f0f11",
   "--background-fill-secondary": "#18181b",
+  "--sidebar-background-fill": "#161619",
   "--body-text-color": "#f4f4f5",
   "--body-text-color-subdued": "#bbbbc2",
   "--border-color-primary": "#3f3f46",

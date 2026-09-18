@@ -53,13 +53,13 @@
 	--spacing-lg: 8px;
 	--spacing-xl: 10px;
 	--spacing-xxl: 16px;
-	--radius-xxs: 1px;
-	--radius-xs: 2px;
-	--radius-sm: 3px;
-	--radius-md: 4px;
-	--radius-lg: 5px;
-	--radius-xl: 8px;
-	--radius-xxl: 12px;
+	--radius-xxs: 2px;
+	--radius-xs: 3px;
+	--radius-sm: 4px;
+	--radius-md: 6px;
+	--radius-lg: 8px;
+	--radius-xl: 10px;
+	--radius-xxl: 14px;
 	--text-xxs: 9px;
 	--text-xs: 10px;
 	--text-sm: 12px;
@@ -72,6 +72,7 @@
 
 	--background-fill-primary: white;
 	--background-fill-secondary: var(--neutral-50);
+	--sidebar-background-fill: var(--neutral-100);
 	--body-text-color: var(--neutral-900);
 	--body-text-color-subdued: var(--neutral-600);
 	--border-color-primary: var(--neutral-200);

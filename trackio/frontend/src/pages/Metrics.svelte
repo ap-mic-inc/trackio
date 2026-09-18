@@ -1,4 +1,5 @@
 <script>
+  import PageHeader from "../components/PageHeader.svelte";
   import { onMount } from "svelte";
   import { getQueryParam } from "../lib/router.js";
   import LinePlot from "../components/LinePlot.svelte";
@@ -335,7 +336,8 @@
 
 </script>
 
-<div class="metrics-page">
+<div class="metrics-page workspace-page">
+  <PageHeader title="Metrics" description="Compare training progress across your selected runs." />
   {#if !appBootstrapReady || !hasLoaded}
     <LoadingTrackio />
   {:else if !project}
@@ -510,7 +512,9 @@
 
 <style>
   .metrics-page {
-    padding: 20px 24px;
+    min-width: 0;
+    box-sizing: border-box;
+    padding: 28px;
     overflow-y: auto;
     flex: 1;
     min-height: 0;
@@ -546,36 +550,7 @@
   .subgroup-list {
     margin-top: 16px;
   }
-  .empty-state {
-    max-width: 640px;
-    padding: 40px 24px;
-    color: var(--body-text-color, #1f2937);
-  }
-  .empty-state h2 {
-    margin: 0 0 8px;
-    font-size: 20px;
-    font-weight: 700;
-  }
-  .empty-state p {
-    margin: 12px 0 8px;
-    color: var(--body-text-color-subdued, #6b7280);
-  }
-  .empty-state pre {
-    background: var(--background-fill-secondary, #f9fafb);
-    padding: 16px;
-    border-radius: var(--radius-lg, 8px);
-    border: 1px solid var(--border-color-primary, #e5e7eb);
-    font-size: 13px;
-    overflow-x: auto;
-  }
-  .empty-state code {
-    background: var(--background-fill-secondary, #f0f0f0);
-    padding: 1px 5px;
-    border-radius: var(--radius-sm, 4px);
-    font-size: 13px;
-  }
-  .empty-state pre code {
-    background: none;
-    padding: 0;
+  @media (max-width: 700px) {
+    .metrics-page { padding: 20px 16px; }
   }
 </style>

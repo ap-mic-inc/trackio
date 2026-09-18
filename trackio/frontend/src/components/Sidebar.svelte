@@ -680,15 +680,16 @@
     font-size: 13px;
     font-weight: 600;
     color: white;
-    background: rgb(20, 28, 46);
+    background: var(--primary-600, #ea580c);
     border-radius: var(--radius-lg, 8px);
     text-decoration: none;
     border: none;
     cursor: pointer;
     box-sizing: border-box;
+    transition: background-color 0.15s;
   }
   .oidc-login-btn:hover {
-    background: rgb(40, 48, 66);
+    background: var(--primary-700, #c2410c);
   }
   .hf-logo {
     width: 20px;
@@ -758,7 +759,7 @@
     font-size: 12px;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     color: var(--body-text-color, #1f2937);
-    background: var(--background-fill-secondary, #f9fafb);
+    background: var(--input-background-fill, white);
     resize: vertical;
   }
   .copy-btn {
