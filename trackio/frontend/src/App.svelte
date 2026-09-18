@@ -540,6 +540,15 @@
     }
   });
 
+  $effect(() => {
+    if (!urlXAxisApplied) return;
+    if (xAxis === "step" || xAxis === "time") return;
+    if (metricColumns.length === 0) return;
+    if (!metricColumns.includes(xAxis)) {
+      xAxis = "step";
+    }
+  });
+
   let urlRunsFromQueryApplied = $state(false);
 
   $effect(() => {

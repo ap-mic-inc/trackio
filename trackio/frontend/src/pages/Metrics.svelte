@@ -214,15 +214,18 @@
     }
 
     const allRows = [];
+    const runXColumns = [];
     for (const run of selectedRuns) {
       const logs = rawDataCache.get(run.id ?? run.name);
       if (!logs) continue;
       const result = processRunData(logs, run, smoothing, xAxis, logScaleX, logScaleY);
       if (result) {
         allRows.push(...result.rows);
-        xColumn = result.xColumn;
+        runXColumns.push(result.xColumn);
       }
     }
+    const desiredXColumn = xAxis === "step" ? "step" : xAxis;
+    xColumn = runXColumns.includes(desiredXColumn) ? desiredXColumn : "step";
     masterData = allRows;
 
     const originals = allRows.filter(
@@ -344,6 +347,16 @@
     if (hasLoaded) {
       processFromCache();
     }
+  });
+
+  let lastXSemantics = null;
+
+  $effect(() => {
+    const semantics = `${project}\0${xAxis}\0${logScaleX}`;
+    if (lastXSemantics !== null && semantics !== lastXSemantics) {
+      xLim = null;
+    }
+    lastXSemantics = semantics;
   });
 
   onMount(() => {
