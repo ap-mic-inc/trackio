@@ -103,7 +103,6 @@ class FrontendMiddleware(BaseHTTPMiddleware):
         self.index_html_path = index_html_path
         self.reserved_prefixes = (
             "/api/",
-            "/file",
             "/version",
             "/artifact_blob/",
             "/static/trackio",
@@ -114,6 +113,7 @@ class FrontendMiddleware(BaseHTTPMiddleware):
         )
         self.reserved_exact = {
             "/api",
+            "/file",
             "/oauth",
             "/login",
             "/setup",
