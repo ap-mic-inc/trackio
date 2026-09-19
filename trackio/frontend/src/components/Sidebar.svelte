@@ -490,91 +490,97 @@
         </div>
 
         {#if currentPage === "metrics" || currentPage === "system"}
-          <span class="section-label">Display Settings</span>
-
-          <div class="section">
-            <GradioCheckbox
-              label="Refresh metrics realtime"
-              bind:checked={realtimeEnabled}
-            />
-            <GradioCheckbox
-              label="Show section headers"
-              bind:checked={showHeaders}
-            />
-            {#if currentPage === "metrics"}
-              <GradioCheckbox
-                label="Show run comparer"
-                bind:checked={showComparer}
-              />
-            {/if}
-          </div>
-
-          <div class="section">
-            <GradioSlider
-              label="Smoothing Factor (0 = no smoothing)"
-              bind:value={smoothing}
-              min={0}
-              max={100}
-              step={1}
-            />
-          </div>
-
-          {#if currentPage === "metrics"}
+          <div class="sidebar-group">
+            <span class="group-title">Panels</span>
             <div class="section">
-              <Dropdown
-                label="Plots per row"
-                info="Auto fits plots to the available width, up to 5 per row."
-                choices={PANELS_PER_ROW_CHOICES}
-                bind:value={panelsPerRow}
-                filterable={false}
+              <GradioTextbox
+                label="Metric Filter"
+                info="Filter metrics using regex patterns. Leave empty to show all metrics."
+                placeholder="e.g., loss|ndcg@10|gpu"
+                bind:value={metricFilter}
               />
             </div>
-          {/if}
-
-          <div class="section">
-            <span class="section-label">X-axis</span>
-            <div class="xaxis-row">
-              {#each COMMON_X_AXES as axis}
-                <button
-                  class="xaxis-tab"
-                  class:active={xAxis === axis.value}
-                  onclick={() => (xAxis = axis.value)}
-                >
-                  {axis.label}
-                </button>
-              {/each}
-              {#if metricColumns.length > 0}
-                <select
-                  class="xaxis-metric"
-                  class:active={metricAxisSelection !== ""}
-                  value={metricAxisSelection}
-                  onchange={handleMetricAxisChange}
-                  aria-label="Use a logged metric as the X-axis"
-                >
-                  <option value="" disabled>Metric…</option>
-                  {#each metricColumns as m}
-                    <option value={m}>{m}</option>
-                  {/each}
-                </select>
+            {#if currentPage === "metrics"}
+              <div class="section">
+                <Dropdown
+                  label="Plots per row"
+                  info="Auto fits plots to the available width, up to 5 per row."
+                  choices={PANELS_PER_ROW_CHOICES}
+                  bind:value={panelsPerRow}
+                  filterable={false}
+                />
+              </div>
+            {/if}
+            <div class="section">
+              <GradioCheckbox
+                label="Show section headers"
+                bind:checked={showHeaders}
+              />
+              {#if currentPage === "metrics"}
+                <GradioCheckbox
+                  label="Show run comparer"
+                  bind:checked={showComparer}
+                />
               {/if}
             </div>
-            <GradioCheckbox
-              label="Log scale X-axis"
-              bind:checked={logScaleX}
-            />
-            <GradioCheckbox
-              label="Log scale Y-axis"
-              bind:checked={logScaleY}
-            />
           </div>
 
-          <div class="section">
-            <GradioTextbox
-              label="Metric Filter"
-              info="Filter metrics using regex patterns. Leave empty to show all metrics."
-              placeholder="e.g., loss|ndcg@10|gpu"
-              bind:value={metricFilter}
-            />
+          <div class="sidebar-group">
+            <span class="group-title">X-axis &amp; smoothing</span>
+            <div class="section">
+              <div class="xaxis-row">
+                {#each COMMON_X_AXES as axis}
+                  <button
+                    class="xaxis-tab"
+                    class:active={xAxis === axis.value}
+                    onclick={() => (xAxis = axis.value)}
+                  >
+                    {axis.label}
+                  </button>
+                {/each}
+                {#if metricColumns.length > 0}
+                  <select
+                    class="xaxis-metric"
+                    class:active={metricAxisSelection !== ""}
+                    value={metricAxisSelection}
+                    onchange={handleMetricAxisChange}
+                    aria-label="Use a logged metric as the X-axis"
+                  >
+                    <option value="" disabled>Metric…</option>
+                    {#each metricColumns as m}
+                      <option value={m}>{m}</option>
+                    {/each}
+                  </select>
+                {/if}
+              </div>
+              <GradioCheckbox
+                label="Log scale X-axis"
+                bind:checked={logScaleX}
+              />
+              <GradioCheckbox
+                label="Log scale Y-axis"
+                bind:checked={logScaleY}
+              />
+            </div>
+            <div class="section">
+              <GradioSlider
+                label="Smoothing (0 = off)"
+                bind:value={smoothing}
+                min={0}
+                max={100}
+                step={1}
+              />
+            </div>
+          </div>
+
+          <div class="sidebar-group">
+            <span class="group-title">Live updates</span>
+            <div class="section">
+              <GradioCheckbox
+                label="Refresh metrics realtime"
+                bind:checked={realtimeEnabled}
+              />
+            </div>
           </div>
         {/if}
       {/if}
@@ -750,12 +756,35 @@
     margin-top: 2px;
     margin-bottom: 18px;
   }
+  .sidebar-group {
+    margin-top: 4px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border-color-primary, #e5e7eb);
+  }
+  .sidebar-group .section:last-child {
+    margin-bottom: 14px;
+  }
+  .group-title {
+    display: block;
+    margin-bottom: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--body-text-color-subdued, #6b7280);
+  }
+  .runs-header .section-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
   .xaxis-row {
     display: flex;
     align-items: stretch;
     gap: 6px;
     flex-wrap: wrap;
-    margin: 8px 0 10px;
+    margin: 2px 0 10px;
   }
   .xaxis-tab {
     padding: 5px 16px;
