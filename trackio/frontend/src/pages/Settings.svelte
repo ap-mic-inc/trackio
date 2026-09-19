@@ -27,6 +27,94 @@
     `trackio skills add ${agents.find((a) => a.id === selectedAgent)?.flag}`
   );
 
+  const llmStages = [
+    { id: "pretrain", label: "Pretraining" },
+    { id: "sft", label: "SFT" },
+    { id: "rl", label: "RLHF / RL" },
+    { id: "evals", label: "Evals" },
+  ];
+  let selectedStage = $state("pretrain");
+
+  let stageCode = $derived.by(() => {
+    const proj = cliProject || "my-project";
+    const snippets = {
+      pretrain: `import trackio
+
+trackio.init(
+    project="${proj}",
+    name="pretrain-7b-v1",
+    group="pretrain",
+    config={"params": "7B", "lr": 3e-4, "global_batch": 1024, "seq_len": 4096},
+)
+
+for step in range(total_steps):
+    metrics = train_step()
+    trackio.log({
+        "train/loss": metrics.loss,
+        "train/grad_norm": metrics.grad_norm,
+        "lr": scheduler.get_last_lr()[0],
+        "perf/tokens_per_s": metrics.tokens_per_s,
+        "perf/step_time_s": metrics.step_time,
+    }, step=step)
+
+trackio.finish()`,
+      sft: `import trackio
+
+trackio.init(
+    project="${proj}",
+    name="sft-v1",
+    group="sft",
+    config={"base_model": "pretrain-7b-v1", "lr": 2e-5, "epochs": 3},
+)
+
+for step, batch in enumerate(train_loader):
+    loss = training_step(batch)
+    trackio.log({"train/loss": loss, "lr": lr, "epoch": epoch}, step=step)
+    if step % eval_every == 0:
+        trackio.log({"eval/loss": evaluate()}, step=step)
+
+trackio.finish()`,
+      rl: `import trackio
+
+trackio.init(
+    project="${proj}",
+    name="grpo-v1",
+    group="rl",
+    config={"algo": "grpo", "kl_coef": 0.05, "rollouts_per_step": 1024},
+)
+
+for it in range(iterations):
+    stats = rl_step()
+    trackio.log({
+        "train/reward": stats.mean_reward,
+        "train/kl": stats.kl,
+        "train/policy_loss": stats.policy_loss,
+        "train/entropy": stats.entropy,
+        "rollout/response_len": stats.mean_response_len,
+        "rollout/accept_rate": stats.accept_rate,
+    }, step=it)
+
+trackio.finish()`,
+      evals: `import trackio
+import pandas as pd
+
+trackio.init(
+    project="${proj}",
+    name="eval-step-2000",
+    group="eval",
+    config={"checkpoint": "step-2000"},
+)
+
+trackio.log({"eval/mmlu": 0.62, "eval/gsm8k": 0.41, "eval/humaneval": 0.33})
+
+df = pd.DataFrame({"prompt": prompts, "completion": completions, "score": scores})
+trackio.log({"eval/samples": trackio.Table(dataframe=df)})
+
+trackio.finish()`,
+    };
+    return snippets[selectedStage];
+  });
+
   const quickstarts = [
     { id: "log", label: "Log metrics" },
     { id: "wandb", label: "Migrate from wandb" },
@@ -254,6 +342,57 @@ trackio.finish()`,
         {:else if selectedQuickstart === "resume"}
           <p class="quickstart-hint">
             <code>resume</code> accepts <code>"never"</code> (default), <code>"allow"</code>, or <code>"must"</code>.
+          </p>
+        {/if}
+      </section>
+
+      <section class="settings-section">
+        <h3 class="section-title">LLM Training Recipes</h3>
+        <p class="section-desc">
+          Stage-by-stage snippets for an LLM training pipeline, using the
+          conventions this dashboard understands: metric prefixes like
+          <code>train/</code>, <code>eval/</code>, and <code>perf/</code>
+          become chart sections, and <code>group=</code> powers the sidebar's
+          Group by. One project can hold every stage.
+        </p>
+        <div class="agent-tabs">
+          {#each llmStages as stage}
+            <button
+              class="agent-tab"
+              class:active={selectedStage === stage.id}
+              onclick={() => { selectedStage = stage.id; }}
+            >
+              {stage.label}
+            </button>
+          {/each}
+        </div>
+        <CodeSnippet code={stageCode} />
+        {#if selectedStage === "pretrain"}
+          <p class="quickstart-hint">
+            Also worth tracking: <code>train/ppl</code>,
+            <code>train/tokens_seen</code>, <code>perf/mfu</code>. Loss spikes
+            are easiest to diagnose next to <code>train/grad_norm</code>, and
+            GPU utilization is logged automatically when
+            <code>nvidia-ml-py</code> is installed.
+          </p>
+        {:else if selectedStage === "sft"}
+          <p class="quickstart-hint">
+            <code>eval/loss</code> rising while <code>train/loss</code> keeps
+            falling is the overfitting signal to watch. Log
+            <code>epoch</code> too so you can switch the X-axis to it.
+          </p>
+        {:else if selectedStage === "rl"}
+          <p class="quickstart-hint">
+            Healthy runs show <code>train/reward</code> climbing while
+            <code>train/kl</code> stays bounded; collapsing
+            <code>train/entropy</code> or exploding
+            <code>rollout/response_len</code> are early failure signals.
+          </p>
+        {:else if selectedStage === "evals"}
+          <p class="quickstart-hint">
+            One run per checkpoint (named after its step) keeps benchmarks
+            comparable in the Runs table, and the samples table appears under
+            Media &amp; Tables for side-by-side reading.
           </p>
         {/if}
       </section>

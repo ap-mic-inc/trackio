@@ -2,7 +2,7 @@
   import PageHeader from "../components/PageHeader.svelte";
   import CodeSnippet from "../components/CodeSnippet.svelte";
   import { onMount } from "svelte";
-  import { getQueryParam } from "../lib/router.js";
+  import { getQueryParam, navigateTo } from "../lib/router.js";
   import LinePlot from "../components/LinePlot.svelte";
   import BarPlot from "../components/BarPlot.svelte";
   import HistogramPlot from "../components/HistogramPlot.svelte";
@@ -419,6 +419,11 @@
       <CodeSnippet
         code={`import trackio\n\ntrackio.init(project="${project}")\nfor i in range(10):\n    trackio.log({"loss": 1 / (i + 1)})\ntrackio.finish()`}
       />
+      <p>
+        Training an LLM? Stage-specific recipes (pretraining, SFT, RLHF,
+        evals) with suggested metrics live in
+        <button class="inline-link" onclick={() => navigateTo("settings")}>Settings</button>.
+      </p>
     </div>
   {:else}
     {#if showComparer}
@@ -636,6 +641,18 @@
   }
   .subgroup-list {
     margin-top: 16px;
+  }
+  .inline-link {
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--color-accent, #f97316);
+    font: inherit;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .inline-link:hover {
+    text-decoration: underline;
   }
   .group-chips {
     position: sticky;
