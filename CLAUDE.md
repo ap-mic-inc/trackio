@@ -76,6 +76,79 @@ Tests are split into unit tests (testing individual modules) and e2e tests (test
 - **Adding import formats**: Extend `imports.py` with new import functions
 - **CLI modifications**: Update `cli.py` and entry points in `pyproject.toml`
 
+## Dashboard Frontend Reference (for AI-assisted development)
+
+### Commands
+
+```bash
+cd trackio/frontend
+npm ci          # once; the root pnpm install does not cover the frontend
+npm test        # vitest; unit tests live in src/lib/*.test.js
+npm run lint
+npm run build   # required after edits: `trackio show` serves dist/, not sources
+```
+
+### Visual verification loop
+
+Never ship a styling or layout change without looking at it. Seed demo data
+into an isolated directory, launch the server, and screenshot with Playwright
+(the repo `.venv` has Python Playwright installed):
+
+```bash
+TRACKIO_DIR=/tmp/trackio-demo python seed_demo.py   # trackio.init/log/finish
+TRACKIO_DIR=/tmp/trackio-demo GRADIO_SERVER_PORT=7860 trackio show
+```
+
+Check both themes: append `?__theme=dark` to any dashboard URL.
+
+### Design conventions
+
+- Style exclusively with the CSS variables from
+  `frontend/src/lib/gradio-theme.css`; dark mode overrides them in
+  `frontend/src/lib/theme.js`. Never hardcode colors.
+- The `--neutral-*` scale is NOT inverted in dark mode. Derive hover and
+  border tints from semantic vars or `color-mix()`, never from `--neutral-*`.
+- Radius tokens: `--radius-md` 6px, `--radius-lg` 8px, `--radius-xl` 10px,
+  `--radius-xxl` 14px. Cards are a single border layer plus `--shadow-drop`;
+  accent CTAs use `--primary-600`.
+- Shared components: `PageHeader.svelte` (page titles), `CodeSnippet.svelte`
+  (copyable code blocks; bind the real project name so snippets run as
+  pasted), `Accordion.svelte` (flat group headings, not boxed cards), and
+  `lib/workspace.css` (`.workspace-page`, `.empty-state`).
+- Keep vega/vega-embed behind `lib/vegaLoader.js` (lazy-loaded). Static
+  imports of vega put ~850 kB back into the entry chunk.
+
+### Conventions the dashboard understands
+
+- Metric prefixes `train/`, `eval/`, `perf/` become chart sections and the
+  Metrics page's group chips.
+- `trackio.init(group=...)` feeds the sidebar's Group by.
+- Overview picks its headline metric by name (`loss`, `reward`, `accuracy`,
+  `score`, ...), so recommend those names in examples.
+
+### Testability pattern
+
+Logic embedded in `.svelte` files is not unit-tested in this repo; extract
+decisions into `frontend/src/lib/*.js` and cover them with vitest. Example:
+`resolveXColumn` in `dataProcessing.js` keeps the metric X-axis independent
+of run order and is tested in `dataProcessing.test.js`.
+
+### Server and auth notes
+
+- The SPA middleware in `trackio/frontend_server.py` serves `index.html` for
+  everything except reserved paths. A backend endpoint that shares a prefix
+  with an SPA route (like `/file` vs the `/files` page) must be reserved as
+  an exact path, not a prefix. Regression tests:
+  `tests/unit/test_frontend_server.py`.
+- OIDC sign-in is enabled whenever an issuer URL and client ID are
+  configured. Admin-page settings win; `TRACKIO_OIDC_*` env vars are the
+  fallback while those fields are empty. Tests: `tests/unit/test_oidc.py`.
+- For end-to-end auth checks, a fake IdP only needs
+  `/.well-known/openid-configuration`, an authorize endpoint that 302s back
+  with `code`+`state`, and a token endpoint returning an unsigned JWT
+  `id_token` (signatures are not verified for tokens fetched directly from
+  the token endpoint over the authenticated channel).
+
 ## GitHub Issue Fix Workflow
 
 When asked to fix a GitHub issue and prepare a PR, use the following end-to-end

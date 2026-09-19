@@ -3,6 +3,7 @@ import {
   computeMetricPlotData,
   downsample,
   processRunData,
+  resolveXColumn,
 } from "./dataProcessing.js";
 
 describe("processRunData smoothing", () => {
@@ -76,6 +77,44 @@ describe("processRunData smoothing", () => {
     );
 
     expect(result.xColumn).toBe("step");
+  });
+
+  test("resolveXColumn uses the requested metric axis when any run provides it", () => {
+    expect(resolveXColumn(["step", "lr"], "lr")).toBe("lr");
+    expect(resolveXColumn(["lr", "step"], "lr")).toBe("lr");
+  });
+
+  test("resolveXColumn falls back to step when no run provides the axis", () => {
+    expect(resolveXColumn(["step", "step"], "lr")).toBe("step");
+    expect(resolveXColumn([], "lr")).toBe("step");
+    expect(resolveXColumn([], "time")).toBe("step");
+  });
+
+  test("resolveXColumn handles step and time axes", () => {
+    expect(resolveXColumn(["step"], "step")).toBe("step");
+    expect(resolveXColumn(["time", "step"], "time")).toBe("time");
+    expect(resolveXColumn(["step"], "time")).toBe("step");
+  });
+
+  test("metric x-axis choice does not depend on run order", () => {
+    const withMetric = [
+      { step: 0, lr: 0.1, loss: 1.0 },
+      { step: 1, lr: 0.05, loss: 0.9 },
+    ];
+    const withoutMetric = [
+      { step: 0, loss: 1.2 },
+      { step: 1, loss: 1.1 },
+    ];
+
+    for (const order of [
+      [withMetric, withoutMetric],
+      [withoutMetric, withMetric],
+    ]) {
+      const xCols = order.map(
+        (logs) => processRunData(logs, "run", 0, "lr", false, false).xColumn,
+      );
+      expect(resolveXColumn(xCols, "lr")).toBe("lr");
+    }
   });
 
   test("keeps downsampled bins stable as points are appended", () => {

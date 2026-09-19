@@ -147,6 +147,11 @@ export function getMetricColumns(rows) {
   return getNumericColumns(rows).filter((c) => !RESERVED_KEYS.includes(c));
 }
 
+export function resolveXColumn(runXColumns, xAxis) {
+  const desired = xAxis === "step" ? "step" : xAxis;
+  return runXColumns.includes(desired) ? desired : "step";
+}
+
 export function computeMetricPlotData(masterData, xColumn, metric, xLim) {
   let relevant = masterData.filter(
     (r) => r[metric] != null && r[metric] !== undefined,

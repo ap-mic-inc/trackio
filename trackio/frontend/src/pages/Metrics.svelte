@@ -17,6 +17,7 @@
   } from "../lib/hostPolling.js";
   import {
     processRunData,
+    resolveXColumn,
     getMetricColumns,
     groupMetricsByPrefix,
     filterMetricsByRegex,
@@ -224,8 +225,7 @@
         runXColumns.push(result.xColumn);
       }
     }
-    const desiredXColumn = xAxis === "step" ? "step" : xAxis;
-    xColumn = runXColumns.includes(desiredXColumn) ? desiredXColumn : "step";
+    xColumn = resolveXColumn(runXColumns, xAxis);
     masterData = allRows;
 
     const originals = allRows.filter(
