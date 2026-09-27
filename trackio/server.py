@@ -106,12 +106,6 @@ def _inbox_poll_loop() -> None:
 
 def start_inbox_poller() -> None:
     global _inbox_poller_thread
-    try:
-        from trackio import fragments  # noqa: PLC0415
-
-        fragments.import_inbox_dir()
-    except Exception as e:
-        logger.warning("inbox fragment import at startup failed: %s", e)
     with _inbox_poller_lock:
         if _inbox_poller_thread is not None and _inbox_poller_thread.is_alive():
             return
@@ -749,6 +743,7 @@ def artifact_log(
     run_name: str | None,
     run_id: str | None,
     hf_token: str | None,
+    overwrite: bool = False,
 ) -> dict[str, Any]:
     assert_can_write_metrics(request, hf_token)
     project = _validate_project_name(project)
@@ -759,6 +754,10 @@ def artifact_log(
         raise TrackioAPIError(str(err)) from err
     if not isinstance(type, str) or not type:
         raise TrackioAPIError(f"Artifact type must be a non-empty string, got {type!r}")
+    if not isinstance(overwrite, bool):
+        raise TrackioAPIError(
+            f"Artifact overwrite must be a boolean, got {overwrite!r}"
+        )
     try:
         aliases = cas.validate_aliases(aliases)
     except ValueError as err:
@@ -812,6 +811,7 @@ def artifact_log(
         aliases=aliases,
         run_name=run_name,
         run_id=run_id,
+        overwrite=overwrite,
     )
 
 
@@ -1033,6 +1033,7 @@ def get_metric_values(
     at_time: str | None = None,
     window: int | None = None,
     run_id: str | None = None,
+    max_points: int | None = None,
 ) -> list[dict[str, Any]]:
     return SQLiteStorage.get_metric_values(
         project,
@@ -1043,6 +1044,7 @@ def get_metric_values(
         at_time=at_time,
         window=window,
         run_id=run_id,
+        max_points=max_points,
     )
 
 

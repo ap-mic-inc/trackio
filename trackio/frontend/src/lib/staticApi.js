@@ -26,6 +26,10 @@ export async function initialize(cfg) {
   config = cfg;
 }
 
+export function getTrackioVersion() {
+  return config?.version || null;
+}
+
 export function getReadOnlySource() {
   if (!config || config.mode !== "static") return null;
   if (config.bucket_id) {
@@ -39,15 +43,19 @@ export function getReadOnlySource() {
   };
 }
 
-async function getMetricsData() {
+async function getMetricsData(signal) {
   if (metricsData) return metricsData;
-  metricsData = await readParquet(resolveUrl("metrics.parquet"));
+  metricsData = await readParquet(resolveUrl("metrics.parquet"), {}, signal);
   return metricsData;
 }
 
-async function getSystemData() {
+async function getSystemData(signal) {
   if (systemData) return systemData;
-  systemData = await readParquet(resolveUrl("aux/system_metrics.parquet"));
+  systemData = await readParquet(
+    resolveUrl("aux/system_metrics.parquet"),
+    {},
+    signal,
+  );
   return systemData;
 }
 
@@ -87,13 +95,16 @@ function getArtifactVersions() {
 
 async function getArtifactTables() {
   if (artifactData) return artifactData;
-  const [artifacts, versions, aliases, links] = await Promise.all([
+  const [artifacts, versions, aliases, links, externalLinks] = await Promise.all([
     readParquet(resolveUrl("aux/artifacts.parquet")).catch(() => []),
     getArtifactVersions(),
     readParquet(resolveUrl("aux/artifact_aliases.parquet")).catch(() => []),
     readParquet(resolveUrl("aux/run_artifact_links.parquet")).catch(() => []),
+    readParquet(resolveUrl("aux/external_run_artifact_links.parquet")).catch(
+      () => [],
+    ),
   ]);
-  artifactData = { artifacts, versions, aliases, links };
+  artifactData = { artifacts, versions, aliases, links, externalLinks };
   return artifactData;
 }
 
@@ -197,8 +208,9 @@ function parseHistogramValue(value) {
   return null;
 }
 
-export async function getLogs(_project, run, options = {}) {
-  const raw = await getMetricsData();
+export async function getLogs(_project, run, options = {}, requestOptions = {}) {
+  requestOptions.signal?.throwIfAborted();
+  const raw = await getMetricsData(requestOptions.signal);
   const { rows } = parseRows(raw);
   const runRows = rows.filter((r) => matchesRun(r, run));
   const scalarOnly = options.scalar_only === true;
@@ -453,8 +465,9 @@ export async function getSystemMetricsForRun(_project, run) {
   return [...present];
 }
 
-export async function getSystemLogs(_project, run) {
-  const raw = await getSystemData();
+export async function getSystemLogs(_project, run, requestOptions = {}) {
+  requestOptions.signal?.throwIfAborted();
+  const raw = await getSystemData(requestOptions.signal);
   const { rows } = parseRows(raw);
   const runRows = rows.filter((r) => matchesRun(r, run));
 
@@ -703,22 +716,33 @@ export async function getArtifactManifest(_project, name, spec) {
 }
 
 async function getLinkOwnership() {
-  const [runs, { links }] = await Promise.all([
+  const [runs, { links, externalLinks }] = await Promise.all([
     getRunsJson(),
     getArtifactTables(),
   ]);
-  return buildRunOwnership(runs, links);
+  return buildRunOwnership(
+    runs,
+    links
+      .filter(
+        (link) =>
+          link.run_project == null || link.run_project === config.project,
+      )
+      .concat(externalLinks),
+  );
 }
 
 export async function getRunArtifacts(_project, run) {
   const result = { input: [], output: [] };
   const target = normalizeRun(run);
   if (target.name == null && target.id == null) return result;
-  const { artifacts, versions, links } = await getArtifactTables();
+  const { artifacts, versions, links, externalLinks } = await getArtifactTables();
   const ownership = await getLinkOwnership();
   const versionsById = new Map(versions.map((v) => [Number(v.id), v]));
   const artifactsById = new Map(artifacts.map((a) => [Number(a.id), a]));
   const runLinks = links
+    .filter(
+      (link) => link.run_project == null || link.run_project === config.project,
+    )
     .filter((l) =>
       target.id != null
         ? canonicalLinkRunId(l, ownership) === target.id
@@ -736,6 +760,7 @@ export async function getRunArtifacts(_project, run) {
     seen.add(dedupeKey);
     result[link.direction].push({
       version_id: Number(version.id),
+      project: config.project,
       name: art.name,
       type: art.type,
       version: Number(version.version),
@@ -743,15 +768,55 @@ export async function getRunArtifacts(_project, run) {
       created_at: link.created_at,
     });
   }
+  const externalRunLinks = externalLinks
+    .filter((link) =>
+      target.id != null
+        ? canonicalLinkRunId(link, ownership) === target.id
+        : matchesRun(link, run),
+    )
+    .sort(compareCreatedAt);
+  for (const link of externalRunLinks) {
+    if (!result[link.direction]) continue;
+    const dedupeKey = `${link.direction}:${link.source_project}:${Number(link.source_version_id)}`;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    result[link.direction].push({
+      version_id: Number(link.source_version_id),
+      project: link.source_project,
+      name: link.source_artifact,
+      type: link.source_type,
+      version: Number(link.source_version),
+      size_bytes: Number(link.source_size_bytes),
+      created_at: link.created_at,
+    });
+  }
+  result.input.sort(compareCreatedAt);
+  result.output.sort(compareCreatedAt);
   return result;
 }
 
 export async function getRunArtifactCounts() {
-  const { links } = await getArtifactTables();
+  const { links, externalLinks } = await getArtifactTables();
   const ownership = await getLinkOwnership();
   const byKey = new Map();
   const seenByKey = new Map();
-  for (const link of links) {
+  const scopedLinks = links
+    .filter(
+      (link) => link.run_project == null || link.run_project === config.project,
+    )
+    .map((link) => ({
+      ...link,
+      artifact_project: config.project,
+      version_id: link.artifact_version_id,
+    }))
+    .concat(
+      externalLinks.map((link) => ({
+        ...link,
+        artifact_project: link.source_project,
+        version_id: link.source_version_id,
+      })),
+    );
+  for (const link of scopedLinks) {
     const runId = canonicalLinkRunId(link, ownership);
     const runName = link.run_name ?? null;
     const key = JSON.stringify([runId, runName]);
@@ -760,7 +825,7 @@ export async function getRunArtifactCounts() {
       seenByKey.set(key, new Set());
     }
     const seen = seenByKey.get(key);
-    const linkKey = `${link.direction}:${Number(link.artifact_version_id)}`;
+    const linkKey = `${link.direction}:${link.artifact_project}:${Number(link.version_id)}`;
     if (seen.has(linkKey)) continue;
     seen.add(linkKey);
     const entry = byKey.get(key);
@@ -783,6 +848,7 @@ export async function getArtifactConsumers(_project, versionId) {
     .map((l) => ({
       run_name: l.run_name ?? null,
       run_id: l.run_id ?? null,
+      project: l.run_project ?? config.project,
       created_at: l.created_at,
     }));
 }

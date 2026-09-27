@@ -1,5 +1,26 @@
 # trackio
 
+## 0.39.0
+
+### Features
+
+- [#697](https://github.com/gradio-app/trackio/pull/697) [`89c9b1b`](https://github.com/gradio-app/trackio/commit/89c9b1b8e644a4ee8e5ae3e86a77d54e8a09360b) - Let an embedding page ask the dashboard for its current view.  Thanks @abidlabs!
+- [#693](https://github.com/gradio-app/trackio/pull/693) [`3db5e38`](https://github.com/gradio-app/trackio/commit/3db5e38a9fd731959b96793c7aebba6c3481615e) - Add overwrite option to log_artifact.  Thanks @abidlabs!
+- [#696](https://github.com/gradio-app/trackio/pull/696) [`81ae55f`](https://github.com/gradio-app/trackio/commit/81ae55fe1fe94e3c4205f9bd892a85cfc73b0ee2) - Hide empty dashboard tabs on narrow viewports.  Thanks @abidlabs!
+
+## 0.38.1
+
+### Features
+
+- [#692](https://github.com/gradio-app/trackio/pull/692) [`217a949`](https://github.com/gradio-app/trackio/commit/217a94957cce97a3822a908560f49c435b5b5117) - Fix CommitOperationAdd import with huggingface_hub 1.32.  Thanks @abidlabs!
+
+## 0.38.0
+
+### Features
+
+- [#684](https://github.com/gradio-app/trackio/pull/684) [`10011b0`](https://github.com/gradio-app/trackio/commit/10011b0590e2a7ebd552837b16f253a665c2128d) - Reduce dashboard canvas GPU memory and render churn.  Thanks @abidlabs!
+- [#688](https://github.com/gradio-app/trackio/pull/688) [`e332a26`](https://github.com/gradio-app/trackio/commit/e332a262a45facc371443d7f16e4f7d39e5869a3) - Show Trackio version beneath dashboard logo.  Thanks @abidlabs!
+
 ## 0.37.1
 
 ### Features

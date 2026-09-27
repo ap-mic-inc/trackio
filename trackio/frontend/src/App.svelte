@@ -54,6 +54,10 @@
   import Admin from "./pages/Admin.svelte";
   import { initTheme, isDark, onThemeChange } from "./lib/theme.js";
   import { applyUrlTokens } from "./lib/urlTokens.js";
+  import {
+    registerSnapshotProvider,
+    startViewStateBridge,
+  } from "./lib/viewState.js";
 
   function metricFilterFromLegacyMetricsParam(metricsParam) {
     if (!metricsParam) return "";
@@ -104,6 +108,7 @@
   let sidebarUserControlled = $state(false);
   let navbarHidden = $state(false);
   let hideEmptyTabs = $state(false);
+  let narrowViewport = $state(false);
   let urlTick = $state(0);
   let alerts = $state([]);
   let pollTimer = $state(null);
@@ -414,6 +419,7 @@
     sidebarUserControlled = !sidebarState.responsive;
 
     const stopNarrowViewportWatch = watchNarrowViewport((narrow) => {
+      narrowViewport = narrow;
       if (sidebarUserControlled) return;
       sidebarOpen = !narrow;
     });
@@ -459,6 +465,22 @@
     });
 
     applyUrlTokens();
+
+    const unregisterAppSnapshot = registerSnapshotProvider("app", () => ({
+      page: currentPage,
+      project: selectedProject,
+      space_id: spaceId,
+      runs: selectedRunRecords.map((run) => ({
+        name: run.name,
+        id: run.id ?? null,
+      })),
+      x_axis: xAxis,
+      smoothing,
+      log_x: logScaleX,
+      log_y: logScaleY,
+      metric_filter: metricFilter,
+    }));
+    const stopViewStateBridge = startViewStateBridge();
 
     (async () => {
       const staticMode = await isStaticMode();
@@ -508,6 +530,8 @@
       if (mutationPollTimer) clearInterval(mutationPollTimer);
       window.removeEventListener("focus", refreshMutationAccess);
       stopNarrowViewportWatch();
+      stopViewStateBridge();
+      unregisterAppSnapshot();
     };
   });
 
@@ -663,7 +687,7 @@
         {currentPage}
         {tabAvailability}
         optionalEmptyTabs={OPTIONAL_EMPTY_TABS}
-        {hideEmptyTabs}
+        hideEmptyTabs={hideEmptyTabs || narrowViewport}
         showAdmin={mutationStatus.admin && !mutationStatus.spaces}
         onNavigate={handleNavigate}
       />
