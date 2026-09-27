@@ -1,5 +1,6 @@
 <script>
   import PageHeader from "../components/PageHeader.svelte";
+  import ProjectRunGuides from "../components/ProjectRunGuides.svelte";
   import CodeSnippet from "../components/CodeSnippet.svelte";
   import { tick } from "svelte";
   import LoadingTrackio from "../components/LoadingTrackio.svelte";
@@ -158,6 +159,9 @@
 
 <div class="runs-page workspace-page">
   <PageHeader title="Runs" description="Review experiment runs, compare progress, and manage your history." count={loading ? null : runsData.length} />
+  {#if project}
+    <ProjectRunGuides {project} />
+  {/if}
   {#if loading}
     <LoadingTrackio />
   {:else if runsData.length === 0}

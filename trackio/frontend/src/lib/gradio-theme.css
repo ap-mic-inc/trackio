@@ -1,4 +1,7 @@
 :root {
+	--status-success: #047857;
+	--status-warning: #92400e;
+	--status-danger: #b91c1c;
 	--primary-50: #fff7ed;
 	--primary-100: #ffedd5;
 	--primary-200: #fed7aa;

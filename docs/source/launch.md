@@ -73,6 +73,7 @@ The currently available HTTP endpoints are:
 - `POST /api/get_metrics_for_run`
 - `POST /api/get_all_projects`
 - `POST /api/get_project_summary`
+- `POST /api/get_run_status`
 - `POST /api/get_run_summary`
 - `POST /api/get_system_metrics_for_run`
 - `POST /api/get_system_logs`
@@ -90,6 +91,17 @@ The currently available HTTP endpoints are:
 - `POST /api/upload` for multipart file uploads used by media and file-related flows
 
 For reading stored files returned by the API, Trackio also serves `GET /file?path=...`.
+
+For a lightweight activity overview, send `{"project": "my-project"}` to
+`POST /api/get_run_status`. Its `data` contains `server_time` (UTC), `tail_rows`
+(50), and `runs`. Each run includes its `id`, `name`, first and last timestamps,
+latest step, and numeric metric summaries (`last`, `prev`, `step`, `timestamp`).
+These summaries cover only the latest 50 log entries, ordered by timestamp and
+then insertion ID; infrequently logged metrics outside that window are omitted.
+The latest step belongs to the latest entry, rather than the maximum step ever
+logged. Runs with persisted configs or artifact links but no metrics are included
+with empty metric summaries and null last timestamps. Recent logs indicate data
+activity, not whether the training process is still running.
 
 <hfoptions id="language">
 <hfoption id="Shell">

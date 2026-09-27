@@ -15,6 +15,9 @@ function _notify() {
 }
 
 const darkOverrides = {
+  "--status-success": "#6ee7b7",
+  "--status-warning": "#fcd34d",
+  "--status-danger": "#fca5a5",
   "--neutral-50": "#fafafa",
   "--neutral-100": "#f4f4f5",
   "--neutral-200": "#e4e4e7",

@@ -1,5 +1,6 @@
 import * as staticApi from "./staticApi.js";
 import { registerRateLimitHit } from "./hostPolling.js";
+import { summarizeRun } from "./runStatus.js";
 
 const BASE = window.__trackio_base || "";
 
@@ -9,7 +10,7 @@ let _mediaDir = "";
 
 async function _detectStaticMode() {
   try {
-    const resp = await fetch(`${BASE}/config.json`);
+    const resp = await fetch(`${BASE}/config.json`, { signal: AbortSignal.timeout(15000) });
     if (resp.ok) {
       const cfg = await resp.json();
       if (cfg.mode === "static") {
@@ -39,7 +40,7 @@ function getOauthSessionHeader() {
   return sid ? { "x-trackio-oauth-session": sid } : {};
 }
 
-export async function callApi(apiName, params = {}) {
+export async function callApi(apiName, params = {}, options = {}) {
   const cleanApiName = apiName.startsWith("/") ? apiName.slice(1) : apiName;
   const url = `${BASE}/api/${cleanApiName}`;
   const resp = await fetch(url, {
@@ -47,6 +48,7 @@ export async function callApi(apiName, params = {}) {
     credentials: "include",
     headers: { "Content-Type": "application/json", ...getOauthSessionHeader() },
     body: JSON.stringify(params),
+    signal: options.signal,
   });
   if (resp.status === 429) {
     registerRateLimitHit();
@@ -126,6 +128,19 @@ export async function getTraceSteps(project, run) {
 export async function getProjectSummary(project) {
   if (await isStaticMode()) return staticApi.getProjectSummary(project);
   return await callApi("/get_project_summary", { project });
+}
+
+export async function getRunStatus(project, { signal } = {}) {
+  const snapshot = await isStaticMode();
+  signal?.throwIfAborted();
+  if (snapshot) {
+    const summary = await staticApi.getProjectSummary(project);
+    const runs = await Promise.all(summary.runs.map(async (record) =>
+      summarizeRun(record, await staticApi.getLogs(project, record, { scalar_only: true })),
+    ));
+    return { runs, tail_rows: 50, snapshot: true };
+  }
+  return await callApi("/get_run_status", { project }, { signal });
 }
 
 export async function getRunSummary(project, run) {

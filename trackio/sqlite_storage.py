@@ -1,6 +1,7 @@
 import atexit
 import hashlib
 import json as json_mod
+import math
 import os
 import shutil
 import sqlite3
@@ -927,6 +928,95 @@ class SQLiteStorage:
             if "no such table: metrics" in str(e):
                 return []
             raise
+
+    @staticmethod
+    def get_run_status(project: str, tail_rows: int = 50) -> list[dict[str, Any]]:
+        """Summarize recent scalar metrics without loading full run histories.
+
+        Metric values and deltas cover only the newest ``tail_rows`` records,
+        ordered by timestamp and then insertion ID. Runs without logs are
+        included when they have a persisted config or artifact link.
+        """
+        if not 1 <= tail_rows <= 500:
+            raise ValueError("tail_rows must be between 1 and 500")
+        records = SQLiteStorage.get_run_records(project)
+        db_path = SQLiteStorage.get_project_db_path(project)
+        if not db_path.exists():
+            return []
+
+        with SQLiteStorage._get_connection(db_path) as conn:
+            supports_ids = SQLiteStorage._supports_run_ids(conn)
+            config_columns = SQLiteStorage._table_columns(conn, "configs")
+            if config_columns:
+                config_key = "run_id" if "run_id" in config_columns else "run_name"
+                known = {record["id"] or record["name"] for record in records}
+                for row in conn.execute(
+                    f"SELECT {config_key} AS run_key, run_name, created_at FROM configs"
+                ):
+                    if row["run_key"] not in known:
+                        records.append(
+                            {
+                                "id": row["run_key"],
+                                "name": row["run_name"],
+                                "created_at": row["created_at"],
+                            }
+                        )
+                        known.add(row["run_key"])
+
+            has_metrics = bool(SQLiteStorage._table_columns(conn, "metrics"))
+            results = []
+            for record in records:
+                rows = []
+                if has_metrics:
+                    column = "run_id" if supports_ids else "run_name"
+                    identity = record["id"] if supports_ids else record["name"]
+                    rows = conn.execute(
+                        f"""
+                        SELECT timestamp, step, metrics FROM metrics
+                        WHERE {column} = ?
+                        ORDER BY timestamp DESC, id DESC LIMIT ?
+                        """,
+                        (identity, tail_rows),
+                    ).fetchall()
+                metrics: dict[str, dict[str, Any]] = {}
+                for row in rows:
+                    try:
+                        values = orjson.loads(row["metrics"])
+                    except (TypeError, ValueError):
+                        continue
+                    if not isinstance(values, dict):
+                        continue
+                    for name, value in values.items():
+                        if (
+                            isinstance(value, bool)
+                            or not isinstance(value, int | float)
+                            or not math.isfinite(value)
+                        ):
+                            continue
+                        if name not in metrics:
+                            metrics[name] = {
+                                "last": value,
+                                "prev": None,
+                                "step": row["step"],
+                                "timestamp": row["timestamp"],
+                            }
+                        elif metrics[name]["prev"] is None:
+                            metrics[name]["prev"] = value
+                newest = rows[0] if rows else None
+                oldest = rows[-1] if rows else None
+                results.append(
+                    {
+                        "id": record["id"],
+                        "name": record["name"],
+                        "first_timestamp": record["created_at"],
+                        "last_timestamp": newest["timestamp"] if newest else None,
+                        "last_step": newest["step"] if newest else None,
+                        "tail_first_timestamp": oldest["timestamp"] if oldest else None,
+                        "tail_first_step": oldest["step"] if oldest else None,
+                        "metrics": metrics,
+                    }
+                )
+            return results
 
     @staticmethod
     def get_latest_run_record_by_name(

@@ -13,6 +13,7 @@ import time
 import warnings
 from collections import deque
 from collections.abc import Callable
+from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -1090,6 +1091,15 @@ def get_project_summary(project: str) -> dict[str, Any]:
     }
 
 
+def get_run_status(project: str) -> dict[str, Any]:
+    runs = SQLiteStorage.get_run_status(project)
+    return {
+        "server_time": datetime.now(timezone.utc).isoformat(),
+        "tail_rows": 50,
+        "runs": runs,
+    }
+
+
 def get_run_summary(
     project: str, run: str | None = None, run_id: str | None = None
 ) -> dict[str, Any]:
@@ -1619,6 +1629,7 @@ def _api_registry() -> dict[str, Any]:
         "get_metrics_for_run": get_metrics_for_run,
         "get_all_projects": get_all_projects,
         "get_project_summary": get_project_summary,
+        "get_run_status": get_run_status,
         "get_run_summary": get_run_summary,
         "get_system_metrics_for_run": get_system_metrics_for_run,
         "get_system_logs": get_system_logs,
