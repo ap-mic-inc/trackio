@@ -755,16 +755,13 @@
     text-decoration: underline;
   }
   .group-chips {
-    position: sticky;
-    top: 0;
-    z-index: 5;
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
     margin: 0 0 14px;
     padding: 8px 0;
-    background: var(--background-fill-primary, white);
-    box-shadow: 0 -28px 0 0 var(--background-fill-primary, white);
+    background: transparent;
+    box-shadow: none;
   }
   .group-chip {
     display: inline-flex;
@@ -773,7 +770,7 @@
     padding: 4px 12px;
     border: 1px solid var(--border-color-primary, #e5e7eb);
     border-radius: 999px;
-    background: var(--background-fill-primary, white);
+    background: transparent;
     color: var(--body-text-color-subdued, #6b7280);
     font: inherit;
     font-size: 12.5px;

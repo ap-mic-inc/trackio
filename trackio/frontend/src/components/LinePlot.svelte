@@ -870,6 +870,7 @@
     padding: 12px;
     overflow: hidden;
     position: relative;
+    isolation: isolate;
   }
   .plot-container[draggable="true"] {
     cursor: grab;
@@ -987,7 +988,7 @@
   }
   .plot {
     width: 100%;
-    min-height: 300px;
+    min-height: 0;
   }
   .plot :global(.vega-embed) {
     width: 100% !important;
@@ -1062,11 +1063,6 @@
   .plot-container .custom-legend {
     justify-content: flex-start;
     padding: 8px 6px 0 18px;
-    opacity: 0;
-    transition: opacity 0.15s;
-  }
-  .plot-container:hover .custom-legend,
-  .plot-container:focus-within .custom-legend {
     opacity: 1;
   }
   .legend-title {
