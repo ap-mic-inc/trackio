@@ -72,7 +72,7 @@ from trackio.sqlite_storage import SQLiteStorage as S
 print(len(S.get_run_status('rd-rich-demo')))"
 ```
 
-Expect 17 runs with `--live-seconds`, 15 without. For UI work, screenshot
+Expect 19 runs with `--live-seconds`, 17 without (15 with `--no-media`). For UI work, screenshot
 `http://127.0.0.1:<port>/overview?project=rd-rich-demo` with Playwright (installed
 in `.venv`) and look at it; add `?__theme=dark` for dark mode.
 
@@ -93,6 +93,10 @@ in `.venv`) and look at it; add `?__theme=dark` for dark mode.
 - **Alerts**: info, warn and error, with steps and backdated timestamps.
 - **Showcase run**: images, histograms, tables, a markdown report, bilingual
   traces, and model and dataset artifacts.
+- **Lineage chain** (group `lineage`): `lineage-eval-showcase-model` uses the
+  showcase model and dataset and logs `eval-results`, which
+  `lineage-build-report` uses to log `eval-report`, so run and artifact
+  Lineage views show upstream and downstream neighbours.
 - **Project files** (Files page, via `trackio.save`): nested `configs/`,
   `scripts/`, `notes/`, `results/` with every previewable text type, a Unicode
   file name with spaces, a 72 KB log past the 50,000-character preview limit,

@@ -636,6 +636,43 @@ def seed_showcase_run(project: str, steps: int = 40) -> None:
     trackio.finish()
 
 
+def seed_lineage_chain(project: str) -> list[str]:
+    """Runs that consume the showcase artifacts and produce new ones, so each
+    run's Lineage view has upstream and downstream neighbours:
+    showcase-model + eval-set -> eval run -> eval-results -> report run."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        trackio.init(
+            project=project,
+            name="lineage-eval-showcase-model",
+            group="lineage",
+            auto_log_gpu=False,
+            auto_log_cpu=False,
+        )
+        trackio.use_artifact("showcase-model:best", type="model")
+        trackio.use_artifact("eval-set", type="dataset")
+        trackio.log({"eval/accuracy": 0.81, "eval/loss": 0.42})
+        results = tmp_path / "eval-results.json"
+        results.write_text('{"accuracy": 0.81, "loss": 0.42}')
+        trackio.log_artifact(results, name="eval-results", type="evaluation")
+        trackio.finish()
+
+        trackio.init(
+            project=project,
+            name="lineage-build-report",
+            group="lineage",
+            auto_log_gpu=False,
+            auto_log_cpu=False,
+        )
+        trackio.use_artifact("eval-results", type="evaluation")
+        report = tmp_path / "report.md"
+        report.write_text("# Evaluation report\n\nAccuracy 0.81.\n")
+        trackio.log({"report/pages": 1})
+        trackio.log_artifact(report, name="eval-report", type="report")
+        trackio.finish()
+    return ["lineage-eval-showcase-model", "lineage-build-report"]
+
+
 PROJECT_FILES = {
     "configs/train.yaml": "model: qwen2.5-7b\nlr: 2.0e-5\nepochs: 3\nbatch_size: 64\n",
     "configs/eval.yaml": "benchmarks: [mmlu, gsm8k, humaneval]\nshots: 5\n",
@@ -782,6 +819,8 @@ def main() -> None:
     if not args.no_media:
         seed_showcase_run(args.project)
         print("seeded showcase-all-media-types")
+        for name in seed_lineage_chain(args.project):
+            print(f"seeded lineage run {name}")
 
     if not args.no_files:
         count = seed_project_files(args.project, np.random.default_rng(args.seed))
