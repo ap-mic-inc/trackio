@@ -39,6 +39,7 @@ class SystemLogEntry(TypedDict, total=False):
     run_id: str | None
     metrics: dict[str, Any]
     timestamp: str
+    config: dict[str, Any] | None
     log_id: str | None
 
 

@@ -899,12 +899,12 @@ class SQLiteStorage:
 
     @staticmethod
     def get_run_records(project: str) -> list[dict[str, str | None]]:
-        """Every run in `project`, from metrics plus artifact link rows,
-        including links to artifacts owned by another local project.
+        """Every run in `project`, from metrics, system metrics, and artifact
+        link rows, including links to artifacts owned by another local project.
 
         Link rows carry caller-supplied identities, so they only add a run
-        entry when they introduce a run unknown to metrics: rows whose run_id
-        or run_name is already known to metrics (under any identity) are
+        entry when they introduce a run unknown to metrics or system metrics:
+        rows whose run_id or run_name is already known there (under any identity) are
         ignored, and rows with a NULL run_id count only when no run_id-bearing
         link row shares their name.
         """
@@ -956,9 +956,19 @@ class SQLiteStorage:
                             GROUP BY run_id, run_name"""
                         ).fetchall()
                     ]
+                has_system = bool(SQLiteStorage._table_columns(conn, "system_metrics"))
                 if SQLiteStorage._supports_run_ids(conn):
+                    run_tables = ["metrics"]
+                    if has_system and SQLiteStorage._supports_run_ids(
+                        conn, "system_metrics"
+                    ):
+                        run_tables.append("system_metrics")
+                    known_runs = " UNION ALL ".join(
+                        f"SELECT run_id, run_name FROM {table}" for table in run_tables
+                    )
                     sources = [
-                        "SELECT run_id, run_name, timestamp AS created_at FROM metrics"
+                        f"SELECT run_id, run_name, timestamp AS created_at FROM {table}"
+                        for table in run_tables
                     ]
                     if has_links:
                         sources.append(
@@ -968,11 +978,11 @@ class SQLiteStorage:
                             WHERE {local_link_scope}
                               AND run_name IS NOT NULL
                               AND l.run_name NOT IN (
-                                SELECT run_name FROM metrics
+                                SELECT run_name FROM ({known_runs})
                                 WHERE run_name IS NOT NULL
                               )
                               AND (l.run_id IS NULL OR NOT EXISTS (
-                                SELECT 1 FROM metrics m
+                                SELECT 1 FROM ({known_runs}) m
                                 WHERE m.run_id = l.run_id
                               ))
                               AND (l.run_id IS NOT NULL OR l.run_name NOT IN (
@@ -982,6 +992,7 @@ class SQLiteStorage:
                                   AND {local_link_scope_unaliased}
                               ))
                             """.format(
+                                known_runs=known_runs,
                                 local_link_scope=local_link_scope,
                                 local_link_scope_unaliased=local_link_scope_unaliased,
                             )
@@ -1005,6 +1016,10 @@ class SQLiteStorage:
                     ]
                 else:
                     sources = ["SELECT run_name, timestamp AS created_at FROM metrics"]
+                    if has_system:
+                        sources.append(
+                            "SELECT run_name, timestamp AS created_at FROM system_metrics"
+                        )
                     if has_links:
                         sources.append(
                             "SELECT run_name, created_at FROM run_artifact_links AS l "
@@ -1974,37 +1989,35 @@ class SQLiteStorage:
                 SQLiteStorage._insert_trace_rows(cursor, trace_rows)
 
                 if config:
-                    current_timestamp = datetime.now(timezone.utc).isoformat()
-                    if "run_id" in SQLiteStorage._table_columns(conn, "configs"):
-                        cursor.execute(
-                            """
-                            INSERT OR REPLACE INTO configs
-                            (run_id, run_name, config, created_at)
-                            VALUES (?, ?, ?, ?)
-                            """,
-                            (
-                                resolved_run_id,
-                                run,
-                                orjson.dumps(serialize_values(config)),
-                                current_timestamp,
-                            ),
-                        )
-                    else:
-                        cursor.execute(
-                            """
-                            INSERT OR REPLACE INTO configs
-                            (run_name, config, created_at)
-                            VALUES (?, ?, ?)
-                            """,
-                            (
-                                run,
-                                orjson.dumps(serialize_values(config)),
-                                current_timestamp,
-                            ),
-                        )
+                    SQLiteStorage._write_run_config(conn, resolved_run_id, run, config)
 
                 conn.commit()
         SQLiteStorage.write_trace_sessions(project, trace_rows)
+
+    @staticmethod
+    def _write_run_config(
+        conn: sqlite3.Connection, run_id: str, run: str, config: dict
+    ) -> None:
+        current_timestamp = datetime.now(timezone.utc).isoformat()
+        payload = orjson.dumps(serialize_values(config))
+        if "run_id" in SQLiteStorage._table_columns(conn, "configs"):
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO configs
+                (run_id, run_name, config, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (run_id, run, payload, current_timestamp),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO configs
+                (run_name, config, created_at)
+                VALUES (?, ?, ?)
+                """,
+                (run, payload, current_timestamp),
+            )
 
     @staticmethod
     def bulk_log_system(
@@ -2015,10 +2028,15 @@ class SQLiteStorage:
         log_ids: list[str] | None = None,
         space_id: str | None = None,
         run_id: str | None = None,
+        config: dict | None = None,
     ):
         """
         Log system metrics (GPU, etc.) to the database without step numbers.
         These metrics use timestamps for the x-axis instead of steps.
+
+        ``config`` is persisted like ``bulk_log``'s, so a run that only ever
+        logs system metrics (e.g. a monitoring-only node in multi-node
+        training) still records its config and group.
         """
         if not metrics_list:
             return
@@ -2080,6 +2098,9 @@ class SQLiteStorage:
                         """,
                         data,
                     )
+                if config:
+                    SQLiteStorage._write_run_config(conn, resolved_run_id, run, config)
+
                 conn.commit()
 
     @staticmethod

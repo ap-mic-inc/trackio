@@ -447,10 +447,17 @@ class Run:
             for entry in logs:
                 key = (entry["project"], entry["run"], entry.get("run_id"))
                 if key not in logs_by_run:
-                    logs_by_run[key] = {"metrics": [], "timestamps": [], "log_ids": []}
+                    logs_by_run[key] = {
+                        "metrics": [],
+                        "timestamps": [],
+                        "log_ids": [],
+                        "config": None,
+                    }
                 logs_by_run[key]["metrics"].append(entry["metrics"])
                 logs_by_run[key]["timestamps"].append(entry.get("timestamp"))
                 logs_by_run[key]["log_ids"].append(entry.get("log_id"))
+                if entry.get("config") and logs_by_run[key]["config"] is None:
+                    logs_by_run[key]["config"] = entry["config"]
 
             for (project, run, run_id), data in logs_by_run.items():
                 has_log_ids = any(lid is not None for lid in data["log_ids"])
@@ -461,6 +468,7 @@ class Run:
                     metrics_list=data["metrics"],
                     timestamps=data["timestamps"],
                     log_ids=data["log_ids"] if has_log_ids else None,
+                    config=data["config"],
                 )
         except Exception as e:
             self._warn_once(
@@ -704,10 +712,17 @@ class Run:
             for entry in logs:
                 key = (entry["project"], entry["run"], entry.get("run_id"))
                 if key not in logs_by_run:
-                    logs_by_run[key] = {"metrics": [], "timestamps": [], "log_ids": []}
+                    logs_by_run[key] = {
+                        "metrics": [],
+                        "timestamps": [],
+                        "log_ids": [],
+                        "config": None,
+                    }
                 logs_by_run[key]["metrics"].append(entry["metrics"])
                 logs_by_run[key]["timestamps"].append(entry.get("timestamp"))
                 logs_by_run[key]["log_ids"].append(entry.get("log_id"))
+                if entry.get("config") and logs_by_run[key]["config"] is None:
+                    logs_by_run[key]["config"] = entry["config"]
 
             for (project, run, run_id), data in logs_by_run.items():
                 SQLiteStorage.bulk_log_system(
@@ -718,6 +733,7 @@ class Run:
                     timestamps=data["timestamps"],
                     log_ids=data["log_ids"],
                     space_id=self._remote_storage_key,
+                    config=data["config"],
                 )
             self._has_local_buffer = True
         except Exception as e:
@@ -1841,6 +1857,9 @@ class Run:
                 "timestamp": timestamp,
                 "log_id": uuid.uuid4().hex,
             }
+            if not self._config_logged and self.config:
+                system_log_entry["config"] = utils.to_json_safe(self.config)
+                self._config_logged = True
 
             with self._client_lock:
                 self._queued_system_logs.append(system_log_entry)

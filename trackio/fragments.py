@@ -66,6 +66,9 @@ def system_metric_record(entry: SystemLogEntry | dict) -> dict:
         "run_id": entry.get("run_id"),
         "metrics": utils.serialize_values(entry.get("metrics") or {}),
         "timestamp": entry.get("timestamp"),
+        "config": utils.serialize_values(entry.get("config"))
+        if entry.get("config")
+        else None,
         "log_id": entry.get("log_id"),
     }
 
@@ -212,6 +215,7 @@ def import_records(records: list[dict]) -> int:
     for (project, run, run_id), group in _group_by_run(system_records).items():
         if not project or not run:
             continue
+        config = next((r["config"] for r in reversed(group) if r.get("config")), None)
         has_timestamps = all(r.get("timestamp") for r in group)
         SQLiteStorage.bulk_log_system(
             project=project,
@@ -220,6 +224,7 @@ def import_records(records: list[dict]) -> int:
             metrics_list=[r.get("metrics") or {} for r in group],
             timestamps=[r["timestamp"] for r in group] if has_timestamps else None,
             log_ids=[r.get("log_id") for r in group],
+            config=config,
         )
         imported += len(group)
 
