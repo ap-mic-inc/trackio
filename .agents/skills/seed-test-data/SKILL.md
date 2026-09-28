@@ -1,6 +1,6 @@
 ---
 name: seed-test-data
-description: Seed a Trackio project with rich, realistic test data (every Overview run state, grouped runs, nested configs, diverging/NaN runs, system metrics, alerts, media, traces, artifacts, live runs) for dashboard development. Use when asked to generate/add test data, demo data, fake runs, 測試資料, 假資料, or to populate a running dashboard.
+description: Seed a Trackio project with rich, realistic test data (every Overview run state, grouped runs, nested configs, diverging/NaN runs, system metrics, alerts, media, traces, artifacts, project files, live runs) for dashboard development. Use when asked to generate/add test data, demo data, fake runs, 測試資料, 假資料, or to populate a running dashboard.
 ---
 
 # Seed rich test data
@@ -24,6 +24,7 @@ PATH):
 | `--reset` | Delete the project before seeding (destructive, confirm first on shared data) |
 | `--seed` | RNG seed for reproducible curves |
 | `--no-media` | Skip the showcase run (images, histograms, tables, reports, traces, artifacts) |
+| `--no-files` | Skip the project files shown on the Files page |
 | `--live-seconds N` / `--live-interval S` | Keep two `live-sft-seed*` runs logging for N seconds |
 | `--show` | Launch a dashboard afterwards |
 
@@ -92,6 +93,10 @@ in `.venv`) and look at it; add `?__theme=dark` for dark mode.
 - **Alerts**: info, warn and error, with steps and backdated timestamps.
 - **Showcase run**: images, histograms, tables, a markdown report, bilingual
   traces, and model and dataset artifacts.
+- **Project files** (Files page, via `trackio.save`): nested `configs/`,
+  `scripts/`, `notes/`, `results/` with every previewable text type, a Unicode
+  file name with spaces, a 72 KB log past the 50,000-character preview limit,
+  and binaries (a checkpoint, a PNG) that only offer download.
 
 ## How it works and how to extend it
 

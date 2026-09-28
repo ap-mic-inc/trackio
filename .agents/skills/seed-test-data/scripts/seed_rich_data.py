@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import os
 import random
 import sqlite3
 import tempfile
@@ -635,6 +636,48 @@ def seed_showcase_run(project: str, steps: int = 40) -> None:
     trackio.finish()
 
 
+PROJECT_FILES = {
+    "configs/train.yaml": "model: qwen2.5-7b\nlr: 2.0e-5\nepochs: 3\nbatch_size: 64\n",
+    "configs/eval.yaml": "benchmarks: [mmlu, gsm8k, humaneval]\nshots: 5\n",
+    "configs/deepspeed.json": '{\n  "zero_optimization": {"stage": 3},\n  "bf16": {"enabled": true}\n}\n',
+    "scripts/train.py": "import trackio\n\ntrackio.init(project='demo')\ntrackio.log({'loss': 0.1})\ntrackio.finish()\n",
+    "scripts/launch.sh": "#!/usr/bin/env bash\ntorchrun --nnodes 2 --nproc-per-node 8 scripts/train.py\n",
+    "notes/README.md": "# 實驗筆記\n\n| Run | 結果 |\n| --- | --- |\n| sft-v1 | baseline |\n",
+    "notes/實驗紀錄 2026-09.txt": "中文檔名與空白的檔案，用來測試路徑編碼。\n",
+    "results/metrics.csv": "step,loss,accuracy\n0,2.10,0.12\n100,0.84,0.61\n200,0.41,0.83\n",
+    "results/summary.json": '{"best_step": 200, "accuracy": 0.83}\n',
+    "results/predictions.tsv": "id\tprediction\tlabel\n1\tcat\tcat\n2\tdog\tcat\n",
+}
+
+
+def seed_project_files(project: str, rng: np.random.Generator) -> int:
+    """Save project-level files covering every Files-page preview path:
+    text formats, nested folders, a Unicode file name, a text file past the
+    50,000-character preview limit, and binaries that only offer download."""
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        for relative, content in PROJECT_FILES.items():
+            path = root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+        long_log = "\n".join(
+            f"step {i:05d} loss={2.0 * math.exp(-i / 800):.5f}" for i in range(3000)
+        )
+        (root / "logs").mkdir()
+        (root / "logs" / "train.log").write_text(long_log, encoding="utf-8")
+        (root / "checkpoints").mkdir()
+        (root / "checkpoints" / "model-step-200.pt").write_bytes(rng.bytes(256 * 1024))
+        image = PILImage.new("RGB", (64, 64), (249, 115, 22))
+        image.save(root / "results" / "confusion-matrix.png")
+        previous = Path.cwd()
+        os.chdir(root)
+        try:
+            trackio.save("**/*", project=project)
+        finally:
+            os.chdir(previous)
+        return sum(1 for f in root.rglob("*") if f.is_file())
+
+
 def live_runs(project: str, seconds: int, interval: float, now: datetime) -> None:
     runs = []
     for i in range(2):
@@ -705,6 +748,11 @@ def main() -> None:
         help="skip the showcase media/trace/artifact run",
     )
     parser.add_argument(
+        "--no-files",
+        action="store_true",
+        help="skip the project files shown on the Files page",
+    )
+    parser.add_argument(
         "--live-seconds",
         type=int,
         default=0,
@@ -734,6 +782,10 @@ def main() -> None:
     if not args.no_media:
         seed_showcase_run(args.project)
         print("seeded showcase-all-media-types")
+
+    if not args.no_files:
+        count = seed_project_files(args.project, np.random.default_rng(args.seed))
+        print(f"seeded {count} project files")
 
     if args.show:
         trackio.show(project=args.project, open_browser=False, block_thread=False)
