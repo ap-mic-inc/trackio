@@ -1884,11 +1884,16 @@ class SQLiteStorage:
         log_ids: list[str] | None = None,
         space_id: str | None = None,
         run_id: str | None = None,
+        replace: bool = False,
     ):
         """
         Safely log bulk metrics to the database. Before logging, this method will ensure the database exists
         and is set up with the correct tables. It also uses a cross-process lock to prevent
         database locking errors when multiple processes access the same database.
+
+        Rows are deduplicated by ``log_id``. By default a repeated ``log_id`` is
+        ignored; with ``replace=True`` it overwrites the stored metrics and
+        traces, so a producer can re-send an entry it has since completed.
         """
         if not metrics_list:
             return
@@ -1967,10 +1972,11 @@ class SQLiteStorage:
                             )
                         )
 
+                insert = "INSERT OR REPLACE" if replace else "INSERT OR IGNORE"
                 if supports_run_ids:
                     cursor.executemany(
-                        """
-                        INSERT OR IGNORE INTO metrics
+                        f"""
+                        {insert} INTO metrics
                         (timestamp, run_id, run_name, step, metrics, log_id, space_id)
                         VALUES (?, ?, ?, ?, ?, ?, ?)
                         """,
@@ -1978,15 +1984,15 @@ class SQLiteStorage:
                     )
                 else:
                     cursor.executemany(
-                        """
-                        INSERT OR IGNORE INTO metrics
+                        f"""
+                        {insert} INTO metrics
                         (timestamp, run_name, step, metrics, log_id, space_id)
                         VALUES (?, ?, ?, ?, ?, ?)
                         """,
                         data,
                     )
 
-                SQLiteStorage._insert_trace_rows(cursor, trace_rows)
+                SQLiteStorage._insert_trace_rows(cursor, trace_rows, replace=replace)
 
                 if config:
                     SQLiteStorage._write_run_config(conn, resolved_run_id, run, config)
@@ -2909,12 +2915,17 @@ class SQLiteStorage:
         return clean_metrics, trace_rows
 
     @staticmethod
-    def _insert_trace_rows(cursor: sqlite3.Cursor, trace_rows: list[dict[str, Any]]):
+    def _insert_trace_rows(
+        cursor: sqlite3.Cursor,
+        trace_rows: list[dict[str, Any]],
+        replace: bool = False,
+    ):
         if not trace_rows:
             return
+        insert = "INSERT OR REPLACE" if replace else "INSERT OR IGNORE"
         cursor.executemany(
-            """
-            INSERT OR IGNORE INTO traces
+            f"""
+            {insert} INTO traces
             (id, run_id, timestamp, run_name, step, key, trace_index, messages, metadata, search_text, log_id, space_id, spans)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,

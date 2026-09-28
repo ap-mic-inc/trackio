@@ -10,7 +10,7 @@ import huggingface_hub
 from huggingface_hub.utils import get_session
 
 import trackio
-from trackio import freeze, show, sync
+from trackio import agent_import, freeze, show, sync
 from trackio import logbook as lb
 from trackio.build_info import version_string
 from trackio.cli_helpers import (
@@ -1431,6 +1431,64 @@ def main():
         help="Output in JSON format",
     )
 
+    import_parser = subparsers.add_parser(
+        "import", help="Import external data into a Trackio project"
+    )
+    import_subparsers = import_parser.add_subparsers(dest="import_type", required=True)
+    import_agent_parser = import_subparsers.add_parser(
+        "agent-session",
+        help="Import a Claude Code or Codex session as traces (one per turn)",
+        description=(
+            "Import a Claude Code or Codex session transcript. The session becomes "
+            "one run and every turn becomes a trace at step=turn, with agent/* "
+            "metrics per turn. Re-importing updates turns in place."
+        ),
+    )
+    import_agent_parser.add_argument(
+        "path",
+        nargs="?",
+        help="Session transcript (.jsonl). Omit with --hook to read it from stdin.",
+    )
+    import_agent_parser.add_argument(
+        "--project",
+        help="Project name (default: name of the session's working directory)",
+    )
+    import_agent_parser.add_argument(
+        "--group",
+        help="Run group (default: claude-code or codex)",
+    )
+    import_agent_parser.add_argument(
+        "--hook",
+        action="store_true",
+        help=(
+            "Read a Claude Code or Codex hook payload from stdin, import the last "
+            "turns, and never fail the agent"
+        ),
+    )
+    import_agent_parser.add_argument(
+        "--last",
+        type=int,
+        help="Only import the last N turns (default with --hook: 2)",
+    )
+    import_agent_parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Import every turn, also in --hook mode",
+    )
+    import_agent_parser.add_argument(
+        "--no-scrub",
+        action="store_true",
+        help="Do not redact common secrets from the transcript",
+    )
+    import_agent_parser.add_argument(
+        "--server-url",
+        help="Self-hosted Trackio server (default: TRACKIO_SERVER_URL)",
+    )
+    import_agent_parser.add_argument(
+        "--space",
+        help="Hugging Face Space to log to (default: TRACKIO_SPACE_ID)",
+    )
+
     skills_parser = subparsers.add_parser(
         "skills",
         help="Manage Trackio skills for AI coding assistants",
@@ -2442,6 +2500,9 @@ def main():
     elif args.command == "query":
         if args.query_type == "project":
             _handle_query(args)
+    elif args.command == "import":
+        if args.import_type == "agent-session":
+            _handle_import_agent_session(args)
     elif args.command == "skills":
         if args.skills_action == "add":
             _handle_skills_add(args)
@@ -2518,6 +2579,49 @@ def _read_logbook_payload(path_or_text, inline_text):
     if path.is_file():
         return path.read_text(encoding="utf-8")
     return path_or_text
+
+
+def _handle_import_agent_session(args):
+    try:
+        hook_payload = agent_import.read_hook_payload() if args.hook else None
+        path = args.path or (hook_payload or {}).get("transcript_path")
+        if not path:
+            error_exit("Provide a session file, or use --hook to read it from stdin.")
+        session = agent_import.load_session(path)
+        if hook_payload is not None:
+            agent_import.apply_final_reply(
+                session, hook_payload.get("last_assistant_message")
+            )
+        project = args.project or agent_import.default_project(session, hook_payload)
+        SQLiteStorage.validate_project_name(project)
+        last = args.last
+        if args.all:
+            last = None
+        elif last is None and args.hook:
+            last = 2
+        entries = agent_import.build_log_entries(
+            session,
+            project=project,
+            group=args.group,
+            last=last,
+            scrub=not args.no_scrub,
+        )
+        destination = agent_import.write_entries(
+            entries, server_url=args.server_url, space_id=args.space
+        )
+    except Exception as e:
+        if args.hook:
+            print(f"trackio import agent-session: {e}", file=sys.stderr)
+            return
+        error_exit(str(e))
+    _, run_name = agent_import.run_identity(session)
+    if not args.hook:
+        total = len(session["turns"])
+        print(
+            f"Imported {len(entries)} of {total} turn(s) from {session['provider']} "
+            f"session {session['session_id']} into project '{project}', "
+            f"run '{run_name}' ({destination})."
+        )
 
 
 def _handle_logbook(args):

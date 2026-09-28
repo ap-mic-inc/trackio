@@ -31,6 +31,8 @@ class LogEntry(TypedDict, total=False):
     step: int | None
     config: dict[str, Any] | None
     log_id: str | None
+    timestamp: str | None
+    replace: bool
 
 
 class SystemLogEntry(TypedDict, total=False):
