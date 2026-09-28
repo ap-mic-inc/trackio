@@ -4,6 +4,7 @@
   import { reportsGuide } from "../lib/quickstarts.js";
   import LoadingTrackio from "../components/LoadingTrackio.svelte";
   import { getAlerts, getLogs } from "../lib/api.js";
+  import { renderMarkdown } from "../lib/markdown.js";
 
   let { project = null, selectedRuns = [] } = $props();
 
@@ -13,29 +14,6 @@
   let loading = $state(false);
 
   const BADGES = { info: "🔵", warn: "🟡", error: "🔴" };
-
-  function renderMarkdown(md) {
-    if (!md) return "";
-    let html = md
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
-    html = html.replace(/^### (.+)$/gm, "<h4>$1</h4>");
-    html = html.replace(/^## (.+)$/gm, "<h3>$1</h3>");
-    html = html.replace(/^# (.+)$/gm, "<h2>$1</h2>");
-    html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-    html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
-    html = html.replace(/^- (.+)$/gm, "<li>$1</li>");
-    html = html.replace(/(<li>.*<\/li>\n?)+/gs, (m) => `<ul>${m}</ul>`);
-    html = html.replace(/\n{2,}/g, "</p><p>");
-    html = `<p>${html}</p>`;
-    html = html.replace(/<p>\s*(<h[234]>)/g, "$1");
-    html = html.replace(/(<\/h[234]>)\s*<\/p>/g, "$1");
-    html = html.replace(/<p>\s*(<ul>)/g, "$1");
-    html = html.replace(/(<\/ul>)\s*<\/p>/g, "$1");
-    html = html.replace(/<p>\s*<\/p>/g, "");
-    return html;
-  }
 
   let alerts = $derived.by(() => {
     if (!filterLevel) return allAlerts;
@@ -328,9 +306,62 @@
     border-radius: var(--radius-sm, 4px);
     font-size: 13px;
   }
-  .report-content :global(ul) {
+  .report-content :global(h5),
+  .report-content :global(h6) {
+    font-size: 13px;
+    font-weight: 600;
+    margin: 8px 0 4px;
+  }
+  .report-content :global(ul),
+  .report-content :global(ol) {
     margin: 4px 0;
     padding-left: 20px;
+  }
+  .report-content :global(a) {
+    color: var(--color-accent, #f97316);
+    text-decoration: underline;
+  }
+  .report-content :global(pre) {
+    margin: 8px 0;
+    padding: 10px 12px;
+    overflow-x: auto;
+    border: 1px solid var(--border-color-primary, #e5e7eb);
+    border-radius: var(--radius-md, 6px);
+    background: var(--background-fill-secondary, #f9fafb);
+  }
+  .report-content :global(pre code) {
+    padding: 0;
+    background: none;
+    font-size: 12px;
+  }
+  .report-content :global(blockquote) {
+    margin: 8px 0;
+    padding: 0 12px;
+    border-left: 3px solid var(--border-color-primary, #e5e7eb);
+    color: var(--body-text-color-subdued, #6b7280);
+  }
+  .report-content :global(hr) {
+    margin: 12px 0;
+    border: none;
+    border-top: 1px solid var(--border-color-primary, #e5e7eb);
+  }
+  .report-content :global(.md-table) {
+    margin: 8px 0;
+    overflow-x: auto;
+  }
+  .report-content :global(table) {
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  .report-content :global(th),
+  .report-content :global(td) {
+    padding: 6px 12px;
+    border: 1px solid var(--border-color-primary, #e5e7eb);
+    text-align: left;
+  }
+  .report-content :global(th) {
+    background: var(--background-fill-secondary, #f9fafb);
+    font-weight: 600;
   }
   .report-content :global(li) {
     margin: 2px 0;
