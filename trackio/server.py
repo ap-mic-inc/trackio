@@ -30,6 +30,7 @@ import trackio.cas as cas
 import trackio.local_auth as local_auth
 import trackio.oidc as oidc
 import trackio.references as references
+import trackio.storage_usage as storage_usage
 import trackio.utils as utils
 from trackio.asgi_app import (
     cleanup_uploaded_temp_file,
@@ -1403,6 +1404,10 @@ def get_registry_details(
     }
 
 
+def get_storage_usage() -> dict[str, Any]:
+    return storage_usage.storage_usage()
+
+
 def get_project_files(project: str) -> list[dict[str, Any]]:
     files_dir = utils.project_media_dir(project) / "files"
     if not files_dir.exists():
@@ -1674,6 +1679,7 @@ def _api_registry() -> dict[str, Any]:
         "get_registries": get_registries,
         "get_registry_details": get_registry_details,
         "get_project_files": get_project_files,
+        "get_storage_usage": get_storage_usage,
         "get_tab_availability": get_tab_availability,
         "delete_run": delete_run,
         "rename_run": rename_run,

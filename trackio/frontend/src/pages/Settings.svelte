@@ -1,12 +1,41 @@
 <script>
   import PageHeader from "../components/PageHeader.svelte";
   import { copyTextToClipboard } from "../lib/clipboard.js";
+  import { getStorageUsage } from "../lib/api.js";
+  import {
+    STORAGE_CATEGORIES,
+    diskStatus,
+    formatBytes,
+    storageRows,
+  } from "../lib/storage.js";
   import {
     getThemePreference,
     setThemePreference,
   } from "../lib/theme.js";
 
   let { spaceId = null, selectedProject = null, projects = [] } = $props();
+
+  let storage = $state(null);
+  let storageLoading = $state(false);
+  let storageError = $state(null);
+  let storageTable = $derived(storageRows(storage, selectedProject));
+  let disk = $derived(diskStatus(storage?.disk));
+
+  async function loadStorage() {
+    storageLoading = true;
+    storageError = null;
+    try {
+      storage = await getStorageUsage();
+    } catch (error) {
+      storageError = String(error?.message || error);
+    } finally {
+      storageLoading = false;
+    }
+  }
+
+  $effect(() => {
+    loadStorage();
+  });
 
   let themeChoice = $state(getThemePreference());
   let copiedIdx = $state(null);
@@ -263,6 +292,75 @@
       </section>
     </div>
   </div>
+
+  {#if storage || storageLoading || storageError}
+    <section class="settings-section storage-section">
+      <div class="storage-heading">
+        <div>
+          <h3 class="section-title">Storage</h3>
+          <p class="section-desc">
+            Disk used by each project under <code>{storage?.trackio_dir ?? "…"}</code>.
+            {#if disk}
+              <span class:disk-low={disk.low}>
+                {formatBytes(disk.free)} free of {formatBytes(disk.total)} ({disk.usedPercent}% of the disk used){disk.low ? " — running low" : ""}.
+              </span>
+            {/if}
+          </p>
+        </div>
+        <button class="storage-refresh" onclick={loadStorage} disabled={storageLoading}>
+          {storageLoading ? "Measuring…" : "Refresh"}
+        </button>
+      </div>
+      {#if storageError}
+        <p class="storage-empty">Could not measure storage: {storageError}</p>
+      {:else if storage && storageTable.rows.length === 0}
+        <p class="storage-empty">No projects yet.</p>
+      {:else if storage}
+        <div class="storage-table-wrap">
+          <table class="storage-table">
+            <thead>
+              <tr>
+                <th>Project</th>
+                {#each STORAGE_CATEGORIES as category}
+                  <th class="num">{category.label}</th>
+                {/each}
+                <th class="num">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each storageTable.rows as row}
+                <tr class:selected={row.selected}>
+                  <td class="project-cell">{row.project}</td>
+                  {#each row.cells as bytes}
+                    <td class="num" class:zero={!bytes}>{formatBytes(bytes)}</td>
+                  {/each}
+                  <td class="num total">{formatBytes(row.total)}</td>
+                </tr>
+              {/each}
+            </tbody>
+            {#if storageTable.rows.length > 1}
+              <tfoot>
+                <tr>
+                  <td>All projects</td>
+                  {#each storageTable.totals as bytes}
+                    <td class="num">{formatBytes(bytes)}</td>
+                  {/each}
+                  <td class="num total">{formatBytes(storageTable.total)}</td>
+                </tr>
+              </tfoot>
+            {/if}
+          </table>
+        </div>
+        <p class="storage-tip">
+          Files are copied in full on every <code>trackio.save()</code>; artifacts store each distinct
+          file once, but every changed checkpoint is a new full copy. Keep large data where it lives
+          with <code>artifact.add_reference(...)</code>, keep only the newest version with
+          <code>log_artifact(..., overwrite=True)</code>, and reclaim a project's space with
+          <code>trackio.delete_project()</code>.
+        </p>
+      {/if}
+    </section>
+  {/if}
 </div>
 
 <style>
@@ -285,6 +383,88 @@
     }
   }
   .col { min-width: 0; }
+  .storage-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .storage-refresh {
+    flex-shrink: 0;
+    padding: 5px 10px;
+    border: 1px solid var(--border-color-primary, #e5e7eb);
+    border-radius: var(--radius-md, 6px);
+    background: var(--background-fill-primary, white);
+    color: var(--body-text-color, #1f2937);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .storage-refresh:disabled {
+    cursor: wait;
+    opacity: 0.6;
+  }
+  .disk-low {
+    color: var(--status-danger);
+    font-weight: 600;
+  }
+  .storage-table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--border-color-primary, #e5e7eb);
+    border-radius: var(--radius-lg, 8px);
+  }
+  .storage-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  .storage-table th,
+  .storage-table td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border-color-primary, #e5e7eb);
+    text-align: left;
+    white-space: nowrap;
+  }
+  .storage-table th {
+    background: var(--background-fill-secondary, #f9fafb);
+    color: var(--body-text-color-subdued, #6b7280);
+    font-weight: 600;
+  }
+  .storage-table .num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .storage-table td.zero {
+    color: var(--body-text-color-subdued, #9ca3af);
+  }
+  .storage-table td.total,
+  .storage-table tfoot td {
+    font-weight: 600;
+  }
+  .storage-table tbody tr:last-child td {
+    border-bottom: none;
+  }
+  .storage-table tfoot td {
+    border-top: 1px solid var(--border-color-primary, #e5e7eb);
+    border-bottom: none;
+  }
+  .storage-table tr.selected .project-cell {
+    color: var(--color-accent, #f97316);
+    font-weight: 600;
+  }
+  .storage-empty,
+  .storage-tip {
+    margin: 10px 0 0;
+    color: var(--body-text-color-subdued, #6b7280);
+    font-size: 12px;
+    line-height: 1.55;
+  }
+  .storage-tip code {
+    padding: 1px 4px;
+    border-radius: var(--radius-sm, 3px);
+    background: var(--background-fill-secondary, #f3f4f6);
+    font-size: 11px;
+  }
   .settings-section {
     margin-bottom: 24px;
     padding: 22px;

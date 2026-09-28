@@ -258,6 +258,11 @@ export async function getRegistryDetails(registry, bucketId = null) {
   });
 }
 
+export async function getStorageUsage() {
+  if (await isStaticMode()) return null;
+  return await callApi("/get_storage_usage");
+}
+
 export async function getProjectFiles(project) {
   if (await isStaticMode()) return staticApi.getProjectFiles(project);
   return await callApi("/get_project_files", { project });
