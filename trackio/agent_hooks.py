@@ -13,6 +13,7 @@ as ``claude -p`` exit as soon as the reply is printed, which kills background
 from __future__ import annotations
 
 import json
+import os
 import shlex
 import shutil
 import sys
@@ -35,14 +36,22 @@ def trackio_executable() -> str:
     return found or "trackio"
 
 
+def user_config_dir(agent: str) -> Path:
+    """The agent's user-level config directory, honouring CLAUDE_CONFIG_DIR
+    and CODEX_HOME like the agents themselves do."""
+    env = {"claude": "CLAUDE_CONFIG_DIR", "codex": "CODEX_HOME"}[agent]
+    override = os.environ.get(env)
+    return Path(override).expanduser() if override else Path(f"~/.{agent}").expanduser()
+
+
 def settings_path(agent: str, root: Path, global_: bool) -> Path:
     if agent == "claude":
         if global_:
-            return Path("~/.claude/settings.json").expanduser()
+            return user_config_dir(agent) / "settings.json"
         return root / ".claude" / "settings.local.json"
     if agent == "codex":
         if global_:
-            return Path("~/.codex/hooks.json").expanduser()
+            return user_config_dir(agent) / "hooks.json"
         return root / ".codex" / "hooks.json"
     raise HookInstallError(f"Unknown agent: {agent}")
 

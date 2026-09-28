@@ -2643,7 +2643,7 @@ def _handle_hooks(args):
         agents = [
             agent
             for agent in agent_hooks.AGENTS
-            if Path(f"~/.{agent}").expanduser().is_dir()
+            if agent_hooks.user_config_dir(agent).is_dir()
         ]
         if not agents:
             error_exit("Pass --claude and/or --codex.")

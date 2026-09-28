@@ -100,6 +100,8 @@ def test_codex_gets_stop_only_and_quoted_paths(tmp_path):
 
 def test_global_paths(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    monkeypatch.delenv("CODEX_HOME", raising=False)
     path, _, _ = agent_hooks.install(
         "claude", root=tmp_path / "repo", global_=True, executable="trackio"
     )
@@ -108,6 +110,17 @@ def test_global_paths(tmp_path, monkeypatch):
         "codex", root=tmp_path / "repo", global_=True, executable="trackio"
     )
     assert path == tmp_path / ".codex" / "hooks.json"
+
+
+def test_global_paths_follow_agent_config_dirs(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude-home"))
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-home"))
+    assert agent_hooks.settings_path("claude", tmp_path, True) == (
+        tmp_path / "claude-home" / "settings.json"
+    )
+    assert agent_hooks.settings_path("codex", tmp_path, True) == (
+        tmp_path / "codex-home" / "hooks.json"
+    )
 
 
 def test_dry_run_and_invalid_json(tmp_path):
