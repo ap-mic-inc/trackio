@@ -1,6 +1,7 @@
 import json
 import logging
 import ssl
+import urllib.parse
 import urllib.request
 from enum import Enum
 
@@ -12,6 +13,8 @@ except ImportError:
     _SSL_CONTEXT = None
 
 logger = logging.getLogger(__name__)
+
+_WEBHOOK_USER_AGENT = "trackio (+https://github.com/gradio-app/trackio)"
 
 
 class AlertLevel(str, Enum):
@@ -147,6 +150,16 @@ def resolve_webhook_min_level(
     return parse_alert_level(webhook_min_level)
 
 
+def redact_webhook_url(url: str) -> str:
+    parts = urllib.parse.urlsplit(url)
+    if not parts.scheme or not parts.netloc:
+        return "<webhook>"
+    host = parts.hostname or ""
+    if parts.port:
+        host = f"{host}:{parts.port}"
+    return f"{parts.scheme}://{host}/***"
+
+
 def should_send_webhook(
     level: AlertLevel, webhook_min_level: AlertLevel | None
 ) -> bool:
@@ -176,9 +189,14 @@ def send_webhook(
 
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
-        url, data=data, headers={"Content-Type": "application/json"}
+        url,
+        data=data,
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": _WEBHOOK_USER_AGENT,
+        },
     )
     try:
         urllib.request.urlopen(req, timeout=10, context=_SSL_CONTEXT)
     except Exception as e:
-        logger.warning(f"Failed to send webhook to {url}: {e}")
+        logger.warning(f"Failed to send webhook to {redact_webhook_url(url)}: {e}")
