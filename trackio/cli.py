@@ -12,6 +12,7 @@ from huggingface_hub.utils import get_session
 import trackio
 from trackio import freeze, show, sync
 from trackio import logbook as lb
+from trackio.build_info import version_string
 from trackio.cli_helpers import (
     error_exit,
     format_alerts,
@@ -779,7 +780,7 @@ def main():
     parser.add_argument(
         "--version",
         action="version",
-        version=f"trackio {trackio.__version__}",
+        version=f"trackio {version_string(trackio.__version__)}",
     )
     parser.add_argument(
         "--space",

@@ -18,6 +18,7 @@ from starlette.responses import FileResponse, JSONResponse, Response, StreamingR
 from starlette.routing import Route
 
 from trackio import utils
+from trackio.build_info import git_revision
 from trackio.exceptions import TrackioAPIError
 from trackio.remote_client import HTTP_API_VERSION
 
@@ -25,6 +26,7 @@ logger = logging.getLogger("trackio.asgi_app")
 
 _PACKAGE_JSON_PATH = Path(__file__).parent / "package.json"
 _TRACKIO_PACKAGE_VERSION = json.loads(_PACKAGE_JSON_PATH.read_text())["version"]
+_GIT_REVISION = git_revision()
 
 
 def _normalize_allowed_file_roots(
@@ -141,6 +143,7 @@ async def version_handler(request: Request) -> Response:
     return JSONResponse(
         {
             "version": _TRACKIO_PACKAGE_VERSION,
+            "git_revision": _GIT_REVISION,
             "api_version": HTTP_API_VERSION,
             "api_transport": "http",
             "mcp_enabled": mcp_enabled,

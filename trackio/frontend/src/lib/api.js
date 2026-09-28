@@ -42,7 +42,7 @@ export async function getTrackioVersion() {
     throw new Error(`Version request failed: ${resp.status}`);
   }
   const data = await resp.json();
-  return data.version || null;
+  return { version: data.version || null, revision: data.git_revision || null };
 }
 
 function getOauthSessionHeader() {

@@ -27,7 +27,7 @@ export async function initialize(cfg) {
 }
 
 export function getTrackioVersion() {
-  return config?.version || null;
+  return { version: config?.version || null, revision: null };
 }
 
 export function getReadOnlySource() {

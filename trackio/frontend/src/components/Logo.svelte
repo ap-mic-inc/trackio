@@ -12,12 +12,14 @@
 
   let { logoUrls = DEFAULT_LOGO_URLS, darkMode = false } = $props();
   let version = $state(null);
+  let revision = $state(null);
 
   onMount(async () => {
     try {
-      version = await getTrackioVersion();
+      ({ version, revision } = await getTrackioVersion());
     } catch {
       version = null;
+      revision = null;
     }
   });
 </script>
@@ -37,7 +39,9 @@
     />
   </button>
   {#if version}
-    <span class="version">APMIC v {version}</span>
+    <span class="version" title={revision ? `Build ${revision}` : undefined}
+      >APMIC v {version}{#if revision}{" · "}<span class="revision">{revision}</span>{/if}</span
+    >
   {/if}
 </div>
 
@@ -75,5 +79,10 @@
     line-height: 1;
     letter-spacing: 0.02em;
     opacity: 0.72;
+    white-space: nowrap;
+  }
+  .revision {
+    font-family: var(--font-mono, ui-monospace, monospace);
+    user-select: all;
   }
 </style>
