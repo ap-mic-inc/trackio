@@ -13,9 +13,18 @@
 }
 /* Data-empty views should use the available workspace instead of appearing as
    a narrow card centered in an otherwise empty tab. */
+.files-page:has(> .empty-state),
+.media-page:has(> .empty-state),
+.reports-page:has(> .empty-state) {
+  display: flex;
+  flex-direction: column;
+}
 .metrics-page > .empty-state,
 .system-page > .empty-state,
-.traces-page > .empty-state {
+.traces-page > .empty-state,
+.files-page > .empty-state,
+.media-page > .empty-state,
+.reports-page > .empty-state {
   width: calc(100% + 56px);
   max-width: none;
   flex: 1;
@@ -121,7 +130,10 @@
   .workspace-page .empty-state { margin: 16px auto; padding: 20px; }
   .metrics-page > .empty-state,
   .system-page > .empty-state,
-  .traces-page > .empty-state {
+  .traces-page > .empty-state,
+  .files-page > .empty-state,
+  .media-page > .empty-state,
+  .reports-page > .empty-state {
     width: calc(100% + 32px);
     margin: 0 -16px -16px;
   }
