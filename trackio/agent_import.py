@@ -586,7 +586,8 @@ def run_identity(session: dict[str, Any]) -> tuple[str, str]:
     prefix = RUN_NAME_PREFIXES[session["provider"]]
     session_id = session["session_id"]
     started = parse_time(session.get("started_at")) or datetime.now(timezone.utc)
-    name = f"{prefix}-{started.strftime('%Y%m%d-%H%M')}-{session_id[:6]}"
+    suffix = (re.sub(r"[^0-9a-zA-Z]", "", session_id) or session_id)[-6:]
+    name = f"{prefix}-{started.strftime('%Y%m%d-%H%M')}-{suffix}"
     return f"{slug}-{session_id}", name
 
 

@@ -525,3 +525,18 @@ def test_claude_subagent_files_nest_under_agent_call(tmp_path):
 def test_codex_tool_failure_from_exit_codes(output, failed):
     assert agent_import._codex_tool_failed(output) is failed
 
+
+def test_run_names_differ_for_time_ordered_session_ids():
+    started = "2026-09-28T16:42:00Z"
+    first = {
+        "provider": "Codex",
+        "session_id": "01a0e8e5-5c33-7373-a514-e211c26d5059",
+        "started_at": started,
+    }
+    second = {
+        "provider": "Codex",
+        "session_id": "01a0e8e5-d58b-7710-8fde-68eda1e4bf68",
+        "started_at": started,
+    }
+    assert agent_import.run_identity(first)[1] == "codex-20260928-1642-6d5059"
+    assert agent_import.run_identity(first)[1] != agent_import.run_identity(second)[1]
