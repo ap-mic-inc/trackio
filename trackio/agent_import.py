@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import uuid
 from datetime import datetime, timezone
@@ -438,6 +439,24 @@ def _codex_output(value: Any) -> str:
     return logbook_trace._text(value)
 
 
+_EXIT_CODE = re.compile(
+    r'\\?"exit_code\\?"\s*:\s*(-?\d+)|exit code:?\s*(-?\d+)|exited with code\s*(-?\d+)',
+    re.IGNORECASE,
+)
+
+
+def _codex_tool_failed(output: str) -> bool | None:
+    """Whether a Codex tool call failed, from the exit codes in its output.
+
+    Returns None when the output carries no exit code, so the span is left
+    without a status instead of being assumed successful.
+    """
+    codes = [int(next(g for g in m.groups() if g)) for m in _EXIT_CODE.finditer(output)]
+    if not codes:
+        return None
+    return any(code != 0 for code in codes)
+
+
 def _parse_codex(records: list[dict]) -> dict[str, Any]:
     session: dict[str, Any] = {"provider": "Codex", "turns": []}
     turns: list[_Turn] = session["turns"]
@@ -531,11 +550,12 @@ def _parse_codex(records: list[dict]) -> dict[str, Any]:
                 )
             )
         elif ptype in {"function_call_output", "custom_tool_call_output"}:
+            output = _codex_output(payload.get("output"))
             current.finish_tool(
                 str(payload.get("call_id")),
-                _codex_output(payload.get("output")),
+                output,
                 ts,
-                False,
+                _codex_tool_failed(output),
             )
     return session
 

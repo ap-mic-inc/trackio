@@ -510,3 +510,18 @@ def test_claude_subagent_files_nest_under_agent_call(tmp_path):
     assert turn.metrics()["agent/tool_calls"] == 2
     assert turn.messages == [{"role": "user", "content": "Delegate it"}]
 
+
+@pytest.mark.parametrize(
+    "output, failed",
+    [
+        ('Script completed\n{"exit_code":0,"output":"2 notes.txt"}', False),
+        ('{"exit_code":0}\n{"exit_code":1,"output":"cat: missing"}', True),
+        ('{\\"exit_code\\":1}', True),
+        ("Process exited with code 2", True),
+        ("Exit code: 0\nok", False),
+        ("plain output", None),
+    ],
+)
+def test_codex_tool_failure_from_exit_codes(output, failed):
+    assert agent_import._codex_tool_failed(output) is failed
+
