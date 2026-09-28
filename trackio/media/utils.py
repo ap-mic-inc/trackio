@@ -1,5 +1,5 @@
 import shutil
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from trackio.utils import project_media_dir
 
@@ -55,6 +55,12 @@ def get_project_media_path(
     else:
         path /= "files"
         if relative_path:
-            path /= relative_path
+            relative = PurePosixPath(str(relative_path).replace("\\", "/"))
+            if relative.is_absolute() or ".." in relative.parts:
+                raise ValueError(
+                    f"relative_path must stay inside the project's files directory: "
+                    f"{relative_path!r}"
+                )
+            path /= Path(*relative.parts) if relative.parts else Path()
     path.mkdir(parents=True, exist_ok=True)
     return path

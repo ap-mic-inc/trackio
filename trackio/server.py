@@ -686,15 +686,22 @@ def bulk_upload_media(
     )
 
     def _write(upload: UploadEntry, src: Path) -> None:
-        media_path = get_project_media_path(
-            project=upload["project"],
-            run=upload["run"],
-            step=upload["step"],
-            relative_path=upload["relative_path"],
-        )
-        if upload["run"]:
-            media_path = media_path / _uploaded_file_media_basename(upload, src.name)
-        shutil.copy(src, media_path)
+        name = _uploaded_file_media_basename(upload, src.name)
+        relative_path = upload["relative_path"]
+        if not upload["run"] and relative_path:
+            relative = PurePosixPath(str(relative_path).replace("\\", "/"))
+            if relative.name == name:
+                relative_path = str(relative.parent)
+        try:
+            media_path = get_project_media_path(
+                project=upload["project"],
+                run=upload["run"],
+                step=upload["step"],
+                relative_path=relative_path,
+            )
+        except ValueError as e:
+            raise TrackioAPIError(str(e)) from e
+        shutil.copy(src, media_path / name)
 
     _bulk_upload(request, uploads, _write)
 

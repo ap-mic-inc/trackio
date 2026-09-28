@@ -1049,9 +1049,9 @@ def save(
                     project=project,
                     run=None,
                     step=None,
-                    relative_path=str(relative_to_base),
+                    relative_path=str(relative_to_base.parent),
                 )
-                shutil.copy(str(file_path), str(media_path))
+                shutil.copy(str(file_path), str(media_path / file_path.name))
     else:
         url = context_vars.current_server.get()
 
@@ -1074,7 +1074,7 @@ def save(
                     "project": project,
                     "run": None,
                     "step": None,
-                    "relative_path": str(relative_to_base),
+                    "relative_path": str(relative_to_base.parent),
                     "uploaded_file": handle_file(file_path),
                 }
                 upload_entries.append(upload_entry)
