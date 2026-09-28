@@ -14,6 +14,7 @@
     spanUsage,
     traceSpans,
     traceSummary,
+    traceHash,
   } from "../lib/traceUtils.js";
 
   let {
@@ -369,13 +370,6 @@
       return index !== "" && !Number.isNaN(Number(index)) ? `${logId}:${index}` : logId;
     }
     return String(id);
-  }
-
-  function traceHash(id) {
-    if (!id) return "";
-    const parts = String(id).split(":");
-    const source = parts.length >= 4 ? parts[1] || parts[0] : String(id);
-    return source.replace(/[^a-zA-Z0-9]/g, "").slice(0, 7) || source.slice(0, 7);
   }
 
   function traceIndex(id) {

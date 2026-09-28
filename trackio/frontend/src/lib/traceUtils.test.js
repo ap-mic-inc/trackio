@@ -6,6 +6,7 @@ import {
   formatDuration,
   messageToolSpans,
   spanDurationMs,
+  traceHash,
   traceSummary,
 } from "./traceUtils.js";
 
@@ -136,5 +137,22 @@ describe("traceUtils", () => {
     expect(traceSummary({ spans: [{ duration_ms: 750 }] }).durationMs).toBe(750);
     expect(formatDuration(23790)).toBe("23.8s");
     expect(formatCost(0.00425)).toBe("$0.0043");
+  });
+});
+
+describe("traceHash", () => {
+  it("uses the log id so traces in one run get distinct hashes", () => {
+    const run = "64498a05c9654e26b694a60ff27b4200";
+    expect(traceHash(`${run}:100d45168dd54ec3:agent/trace`)).toBe("100d451");
+    expect(traceHash(`${run}:35cc0434a59a4367:agent/trace`)).toBe("35cc043");
+  });
+
+  it("uses the log id for list-indexed traces", () => {
+    expect(traceHash("run-id:abcdef123456:trace:2")).toBe("abcdef1");
+  });
+
+  it("falls back to the id itself when it has no log id", () => {
+    expect(traceHash("abcdef123456")).toBe("abcdef1");
+    expect(traceHash("")).toBe("");
   });
 });

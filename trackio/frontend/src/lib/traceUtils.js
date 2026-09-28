@@ -282,3 +282,10 @@ export function formatTokens(tokens) {
   const value = finiteNumber(tokens);
   return value === null ? "—" : Math.round(value).toLocaleString();
 }
+
+export function traceHash(id) {
+  if (!id) return "";
+  const parts = String(id).split(":");
+  const source = parts.length >= 3 ? parts[1] || parts[0] : String(id);
+  return source.replace(/[^a-zA-Z0-9]/g, "").slice(0, 7) || source.slice(0, 7);
+}
