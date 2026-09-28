@@ -588,6 +588,31 @@ trackio.save("configs/*.yaml", project="${p}")
 trackio.save("checkpoints/**/*.pt", project="${p}")`,
         hint: "Pass <code>project=</code> to save without an active run. For versioned outputs such as checkpoints, prefer Artifacts.",
       },
+      {
+        id: "storage",
+        label: "Storage & limits",
+        code: `import trackio
+
+# Small, project-level files: copied in full, overwritten on re-save
+trackio.save("configs/train.yaml", project="${p}")
+
+# Large data: record it as an artifact reference instead of copying it
+trackio.init(project="${p}")
+artifact = trackio.Artifact(name="training-set", type="dataset")
+artifact.add_reference("file:///mnt/data/corpus/")
+trackio.log_artifact(artifact)
+trackio.finish()`,
+        hint: `<ul>
+          <li><strong>No size limit, full copies.</strong> Trackio does not cap file
+            size or count; every <code>trackio.save()</code> copies the file into the
+            project (on the server when you log remotely), so disk space is the only limit.</li>
+          <li><strong>Not versioned.</strong> Saving the same path again overwrites it.
+            Use Artifacts for anything you want to keep several versions of.</li>
+          <li><strong>Keep large data where it is</strong> with an artifact reference:
+            only the URI and checksum are stored.</li>
+          <li><strong>See usage</strong> per project in <em>Settings → Storage</em>.</li>
+        </ul>`,
+      },
     ],
   };
 }
@@ -645,6 +670,62 @@ path = artifact.download()
 
 trackio.finish()`,
         hint: 'Resolve <code>"my-model"</code> (latest), a version like <code>"my-model:v2"</code>, or an alias. Using an artifact records the lineage edge.',
+      },
+      {
+        id: "references",
+        label: "Large data",
+        code: `import trackio
+
+trackio.init(project="${p}")
+
+artifact = trackio.Artifact(name="training-set", type="dataset")
+artifact.add_reference("file:///mnt/nvme/datasets/corpus/")          # a directory
+artifact.add_reference("hf://datasets/org/my-dataset/train.parquet")
+artifact.add_reference("https://example.com/data/eval.json")
+trackio.log_artifact(artifact)
+
+trackio.finish()`,
+        hint: `<ul>
+          <li><strong>References copy nothing.</strong> Only the URI, size, and checksum
+            are stored, so multi-GB checkpoints and datasets stay where they are while
+            still getting versions, aliases, and lineage.</li>
+          <li>Built in: <code>file://</code>, <code>http(s)://</code>, <code>hf://</code>;
+            S3, GCS, and Azure work through a registered <code>ReferenceHandler</code>
+            (see the artifacts guide).</li>
+          <li>Reference bytes are never uploaded to a server, Space, or bucket.</li>
+        </ul>`,
+      },
+      {
+        id: "retention",
+        label: "Keep latest only",
+        code: `import trackio
+
+trackio.init(project="${p}")
+
+for epoch in range(num_epochs):
+    train_one_epoch()
+    trackio.log_artifact(
+        "checkpoints/latest/",
+        name="my-model",
+        type="model",
+        aliases=["latest-epoch"],
+        overwrite=True,  # drop older versions and free their space
+    )
+
+trackio.finish()`,
+        hint: `<ul>
+          <li><strong>How artifacts use space.</strong> Each distinct file is stored
+            once per project, but a checkpoint whose bytes changed is a new full copy, so
+            logging one every epoch grows by one checkpoint per epoch. There is no size
+            or version limit; disk space is the only limit.</li>
+          <li><strong><code>overwrite=True</code></strong> removes the other versions
+            and deletes blobs no remaining version uses. Deleting a run keeps its
+            artifacts; <code>trackio.delete_project()</code> removes everything.</li>
+          <li><code>artifact.download()</code> writes another copy under
+            <code>./.trackio/artifact-downloads/</code>; pass <code>root=</code> to
+            choose where.</li>
+          <li><strong>See usage</strong> per project in <em>Settings → Storage</em>.</li>
+        </ul>`,
       },
     ],
   };
