@@ -412,3 +412,101 @@ def test_bulk_log_replace_overwrites_same_log_id(temp_dir):
     )
     logs = SQLiteStorage.get_logs("p", "r", run_id="rid")
     assert [log["x"] for log in logs] == [3]
+
+
+def test_claude_subagent_files_nest_under_agent_call(tmp_path):
+    session_id = "33333333-aaaa-bbbb-cccc-000000000003"
+
+    def rec(ts, message, **extra):
+        return {"sessionId": session_id, "timestamp": ts, "message": message, **extra}
+
+    main = _write_jsonl(
+        tmp_path / f"{session_id}.jsonl",
+        [
+            rec("2026-09-28T10:00:00Z", {"role": "user", "content": "Delegate it"}),
+            rec(
+                "2026-09-28T10:00:01Z",
+                {
+                    "role": "assistant",
+                    "id": "msg_main",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_agent",
+                            "name": "Agent",
+                            "input": {"prompt": "read app.py"},
+                        }
+                    ],
+                },
+            ),
+            rec(
+                "2026-09-28T10:00:09Z",
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "toolu_agent",
+                            "content": "prints hi",
+                        }
+                    ],
+                },
+            ),
+        ],
+    )
+    subagents = tmp_path / session_id / "subagents"
+    subagents.mkdir(parents=True)
+    (subagents / "agent-abc.meta.json").write_text(
+        json.dumps({"toolUseId": "toolu_agent", "spawnDepth": 1})
+    )
+    _write_jsonl(
+        subagents / "agent-abc.jsonl",
+        [
+            rec(
+                "2026-09-28T10:00:02Z",
+                {"role": "user", "content": "read app.py"},
+                isSidechain=True,
+            ),
+            rec(
+                "2026-09-28T10:00:04Z",
+                {
+                    "role": "assistant",
+                    "id": "msg_sub",
+                    "usage": {"input_tokens": 9, "output_tokens": 1},
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_read",
+                            "name": "Read",
+                            "input": {"file_path": "app.py"},
+                        }
+                    ],
+                },
+                isSidechain=True,
+            ),
+            rec(
+                "2026-09-28T10:00:05Z",
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "toolu_read",
+                            "content": "print('hi')",
+                        }
+                    ],
+                },
+                isSidechain=True,
+            ),
+        ],
+    )
+    [turn] = agent_import.load_session(main)["turns"]
+    spans = {s["id"]: s for s in turn.spans()}
+    sub_generation = spans["gen-agent-abc-msg_sub"]
+    assert sub_generation["parent_id"] == "tool-toolu_agent"
+    assert sub_generation["start_time"] == "2026-09-28T10:00:02Z"
+    assert spans["tool-toolu_read"]["parent_id"] == sub_generation["id"]
+    assert spans["tool-toolu_read"]["status"] == "success"
+    assert turn.metrics()["agent/tool_calls"] == 2
+    assert turn.messages == [{"role": "user", "content": "Delegate it"}]
+

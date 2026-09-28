@@ -359,6 +359,76 @@ def _parse_claude(records: list[dict]) -> dict[str, Any]:
     return session
 
 
+def _subagent_files(path: Path) -> list[tuple[int, str | None, Path]]:
+    files = []
+    for transcript in sorted((path.parent / path.stem / "subagents").glob("*.jsonl")):
+        meta_path = transcript.with_suffix(".meta.json")
+        meta: dict[str, Any] = {}
+        if meta_path.is_file():
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                meta = {}
+        files.append(
+            (int(meta.get("spawnDepth") or 1), meta.get("toolUseId"), transcript)
+        )
+    return sorted(files, key=lambda item: item[0])
+
+
+def _attach_claude_subagents(session: dict[str, Any], path: Path) -> None:
+    """Nest subagent transcripts (``<session>/subagents/agent-*.jsonl``) under
+    the Agent/Task tool call that spawned them, as Claude Code writes them."""
+    turns: list[_Turn] = session["turns"]
+    for _, tool_use_id, transcript in _subagent_files(path):
+        owner = next((t for t in turns if tool_use_id in t.tools), None)
+        if owner is None:
+            continue
+        parent_id = owner.tools[tool_use_id]["id"]
+        last_activity = owner.tools[tool_use_id].get("start_time")
+        agent_key = transcript.stem
+        for record in logbook_trace._records(transcript):
+            message = record.get("message")
+            if not isinstance(message, dict):
+                continue
+            ts = logbook_trace._timestamp(record)
+            blocks = logbook_trace._content_blocks(message.get("content"))
+            if message.get("role") == "user":
+                for block in blocks:
+                    if block.get("type") == "tool_result":
+                        owner.finish_tool(
+                            str(block.get("tool_use_id")),
+                            logbook_trace._text(block.get("content")),
+                            ts,
+                            bool(block.get("is_error")),
+                        )
+                last_activity = ts or last_activity
+                continue
+            if message.get("role") != "assistant":
+                continue
+            model = message.get("model")
+            if model == "<synthetic>":
+                model = None
+            gen_id = f"{agent_key}-{message.get('id') or record.get('uuid') or ts}"
+            generation = owner.add_generation(
+                gen_id,
+                model,
+                _claude_usage(message["usage"]) if message.get("usage") else {},
+                ts,
+                parent_id=parent_id,
+                start=last_activity,
+            )
+            for block in blocks:
+                if block.get("type") == "tool_use":
+                    owner.start_tool(
+                        str(block.get("id")),
+                        str(block.get("name") or "tool"),
+                        block.get("input"),
+                        ts,
+                        parent_id=generation["id"],
+                    )
+            last_activity = ts or last_activity
+
+
 def _codex_output(value: Any) -> str:
     if isinstance(value, list):
         return "\n".join(
@@ -479,6 +549,7 @@ def load_session(path: str | Path) -> dict[str, Any]:
     provider = logbook_trace._detect_provider(records)
     if provider == "claude":
         session = _parse_claude(records)
+        _attach_claude_subagents(session, path)
     elif provider == "codex":
         session = _parse_codex(records)
     else:
