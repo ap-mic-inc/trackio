@@ -425,9 +425,12 @@ trackio import agent-session ~/.codex/sessions/YYYY/MM/DD/rollout-<id>.jsonl --p
             <code>--global</code>). The hook points at this machine's
             <code>trackio</code>, so keep the repository file out of version control.
             Remove it with <code>trackio hooks uninstall --codex</code>.</li>
-          <li><strong>Approve it in Codex.</strong> Codex asks you to review new hooks
-            with <code>/hooks</code>, and only loads a repository's hooks once the
-            project is trusted.</li>
+          <li><strong>Trust it in Codex, or nothing is recorded.</strong> Codex
+            silently skips hooks you have not trusted: open <code>/hooks</code> in Codex
+            once and trust it (a repository's hooks also need the project to be
+            trusted). Trust is tied to the hook's exact command, so re-trust after
+            reinstalling. For <code>codex exec</code> automation you can pass
+            <code>--dangerously-bypass-hook-trust</code> instead.</li>
           <li><strong>No session-end hook.</strong> Codex imports the last turns after
             every reply; if a session was cut short, import its file by hand.</li>
         </ul>`,

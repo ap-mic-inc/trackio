@@ -333,7 +333,8 @@ trackio hooks uninstall --claude                   # remove
 
 The command merges Trackio's hook into the agent's settings
 (`.claude/settings.local.json` or `.codex/hooks.json`) without touching anything
-else, and is safe to re-run. Turns go to the local database, or to your server
+else, and is safe to re-run. Codex only runs hooks you have trusted, so open
+`/hooks` in Codex once after installing. Turns go to the local database, or to your server
 when `TRACKIO_SERVER_URL` and `TRACKIO_WRITE_TOKEN` are set in the agent's
 environment. Past sessions can be imported by hand:
 

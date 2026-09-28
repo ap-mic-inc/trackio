@@ -152,8 +152,14 @@ is traced into a project named after its folder. The command merges into
 existing settings without touching other hooks, points the hook at the
 `trackio` executable it was run from, and is safe to re-run. Preview with
 `--dry-run`, and remove the hooks with `trackio hooks uninstall --claude` or
-`--codex`. Codex asks you to review new hooks with `/hooks` and only loads a
-repository's hooks once the project is trusted.
+`--codex`.
+
+Codex silently skips hooks that you have not trusted, so nothing is recorded
+until you open `/hooks` in Codex and trust the Trackio hook (a repository's hooks
+also need the project to be trusted). Trust is recorded against the hook's exact
+definition, so trust it again after re-running `trackio hooks install` with
+different options. For `codex exec` automation you can pass
+`--dangerously-bypass-hook-trust` instead.
 
 When a turn ends, the agent runs `trackio import agent-session --hook` with the
 transcript path on stdin. It imports the latest turns (`--all` for the whole

@@ -2689,8 +2689,11 @@ def _handle_hooks(args):
             print("  Takes effect in new Claude Code sessions.")
         else:
             print(
-                "  Codex asks you to review new hooks: run /hooks in Codex"
-                + ("." if args.global_ else ", and trust this project.")
+                "  Codex skips hooks until you trust them: open /hooks in Codex and "
+                "trust it"
+                + (" (and trust this project)." if not args.global_ else ".")
+                + " Re-trust after reinstalling; for codex exec automation you can "
+                "pass --dangerously-bypass-hook-trust instead."
             )
             if not args.global_:
                 print(
