@@ -245,7 +245,7 @@
             />
           </label>
           <label>Role
-            <select class="role-select" bind:value={newRole}>
+            <select class="ui-select role-select" bind:value={newRole}>
               <option value="admin">admin</option>
               <option value="write">write</option>
               <option value="read">read-only</option>
@@ -292,7 +292,7 @@
                   </td>
                   <td>
                     <select
-                      class="role-select"
+                      class="ui-select role-select"
                       aria-label={`Role for ${displayName(user)}`}
                       value={currentRole(user)}
                       onclick={(e) => e.stopPropagation()}
@@ -537,10 +537,11 @@
   .toggle { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--subtle); cursor: pointer; }
   .toggle input { width: 16px; height: 16px; flex-shrink: 0; accent-color: var(--color-accent, #f97316); }
   .toggle .badge { margin-left: auto; }
-  .settings-grid input, .create-form input, .role-select { box-sizing: border-box; width: 100%; min-width: 0; min-height: 38px; padding: 8px 11px; border: 1px solid var(--line); border-radius: 7px; background: var(--input-background-fill, white); color: var(--text); font: inherit; font-size: 13px; }
+  .settings-grid input, .create-form input { box-sizing: border-box; width: 100%; min-width: 0; min-height: 38px; padding: 8px 11px; border: 1px solid var(--line); border-radius: 7px; background: var(--input-background-fill, white); color: var(--text); font: inherit; font-size: 13px; }
+  .role-select { width: 100%; height: 38px; border-radius: 7px; }
   input::placeholder { color: var(--muted); opacity: .75; }
   button, input, select { transition: border-color .15s, background-color .15s; }
-  button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--color-accent, #f97316); outline-offset: 3px; }
+  button:focus-visible, input:focus-visible, select:not(.ui-select):focus-visible { outline: 2px solid var(--color-accent, #f97316); outline-offset: 3px; }
   .settings-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding-top: 18px; border-top: 1px solid var(--line); }
   .create-form { display: grid; grid-template-columns: 1fr 1fr minmax(120px, .6fr) auto; gap: 14px; align-items: end; }
   .create-btn, .secondary-btn, .revoke-btn { min-height: 36px; padding: 7px 13px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); color: var(--text); font: inherit; font-size: 12px; font-weight: 500; cursor: pointer; }
@@ -583,7 +584,7 @@
   .badge-type { background: var(--subtle); color: var(--muted); margin-left: 6px; font-size: 10px; }
   .actions-cell { white-space: nowrap; }
   .actions-cell .secondary-btn { margin-right: 6px; }
-  .admin-table .role-select { min-width: 135px; min-height: 32px; padding: 5px 8px; font-size: 12px; }
+  .admin-table .role-select { min-width: 135px; height: 31px; font-size: 12px; }
   .detail-row > td { padding: 16px; background: var(--subtle); }
   .detail { border-left: 2px solid var(--color-accent, #f97316); padding: 0 16px; }
   .detail p { margin: 0 0 10px; }

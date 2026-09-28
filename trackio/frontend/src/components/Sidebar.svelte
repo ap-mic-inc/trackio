@@ -542,7 +542,7 @@
                 {/each}
                 {#if metricColumns.length > 0}
                   <select
-                    class="xaxis-metric"
+                    class="ui-select xaxis-metric"
                     class:active={metricAxisSelection !== ""}
                     value={metricAxisSelection}
                     onchange={handleMetricAxisChange}
@@ -817,20 +817,15 @@
   }
   .xaxis-metric {
     flex: 1 1 90px;
-    min-width: 0;
-    max-width: 100%;
-    padding: 5px 8px;
-    border: 1px solid var(--border-color-primary, #e5e7eb);
+    height: auto;
+    align-self: stretch;
     border-radius: var(--radius-md, 6px);
-    background: var(--input-background-fill, white);
     color: var(--body-text-color-subdued, #6b7280);
-    font: inherit;
     font-size: 12.5px;
-    cursor: pointer;
   }
   .xaxis-metric.active {
     border-color: var(--color-accent, #f97316);
-    background: var(--color-accent-soft, #fff7ed);
+    background-color: var(--color-accent-soft, #fff7ed);
     color: var(--body-text-color, #1f2937);
     font-weight: 600;
   }

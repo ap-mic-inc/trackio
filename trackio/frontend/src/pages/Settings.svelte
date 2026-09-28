@@ -155,7 +155,7 @@
             <label class="selector-label" for="cli-project">Project</label>
             <select
               id="cli-project"
-              class="selector-select"
+              class="ui-select selector-select"
               bind:value={cliProject}
             >
               {#each projects as p}
@@ -353,23 +353,12 @@
     margin-bottom: 12px;
   }
   .selector-label {
-    font-size: var(--text-sm, 12px);
+    font-size: 13px;
     color: var(--body-text-color-subdued, #6b7280);
     flex-shrink: 0;
   }
   .selector-select {
-    padding: 6px 10px;
-    border: 1px solid var(--border-color-primary, #e5e7eb);
-    border-radius: var(--radius-md, 4px);
-    background: var(--background-fill-primary, white);
-    color: var(--body-text-color, #1f2937);
-    font-size: var(--text-sm, 12px);
     min-width: 160px;
-    cursor: pointer;
-  }
-  .selector-select:focus {
-    outline: none;
-    border-color: var(--color-accent, #f97316);
   }
 
   .commands-table {

@@ -393,6 +393,7 @@
               <span>Sort</span>
               <select
                 id="media-sort-order"
+                class="ui-select"
                 bind:value={sortOrder}
                 aria-label="Sort media"
                 onclick={(event) => event.stopPropagation()}
@@ -762,17 +763,8 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: var(--text-sm, 12px);
+    font-size: 13px;
     color: var(--body-text-color-subdued, #6b7280);
-  }
-  .media-control select {
-    height: 30px;
-    border: 1px solid var(--border-color-primary, #d1d5db);
-    border-radius: var(--radius-sm, 4px);
-    background: var(--background-fill-primary, white);
-    color: var(--body-text-color, #1f2937);
-    font-size: var(--text-sm, 12px);
-    padding: 0 28px 0 8px;
   }
   .section-summary {
     display: flex;

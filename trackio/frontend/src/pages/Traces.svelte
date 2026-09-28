@@ -442,8 +442,8 @@
         <input type="text" bind:value={search} placeholder="Search traces by request" aria-label="Search traces" />
       </div>
       <label class="filter-wrap">
-        <span>Step:</span>
-        <select bind:value={stepFilter}>
+        <span>Step</span>
+        <select class="ui-select" bind:value={stepFilter}>
           <option value="all">All steps ({totalCount})</option>
           {#each availableSteps as entry}
             <option value={String(entry.step)}>Step {entry.step} ({entry.count})</option>
@@ -451,8 +451,8 @@
         </select>
       </label>
       <label class="filter-wrap">
-        <span>Sort:</span>
-        <select bind:value={sortBy}>
+        <span>Sort</span>
+        <select class="ui-select" bind:value={sortBy}>
           <option value="request_time_desc">Request time</option>
           <option value="request_time_asc">Oldest first</option>
           <option value="step_desc">Step descending</option>
@@ -755,30 +755,30 @@
     min-width: min(240px, 100%);
     flex: 1;
   }
-  .search-wrap input,
-  .filter-wrap select {
+  .search-wrap input {
     box-sizing: border-box;
     width: 100%;
+    height: 31px;
     border: 1px solid var(--border-color-primary, #e5e7eb);
-    border-radius: var(--radius-md, 6px);
-    background: var(--background-fill-primary, white);
+    border-radius: var(--input-radius, 8px);
+    background: var(--input-background-fill, white);
     color: var(--body-text-color, #1f2937);
-    font-size: 14px;
-    padding: 10px 12px;
+    font-size: 13px;
+    padding: 0 10px;
     font-family: inherit;
   }
   .filter-wrap {
     display: flex;
     align-items: center;
     gap: 8px;
-    color: var(--body-text-color, #1f2937);
-    font-size: 14px;
+    color: var(--body-text-color-subdued, #6b7280);
+    font-size: 13px;
     white-space: nowrap;
   }
   .count {
     margin-left: auto;
     color: var(--body-text-color-subdued, #6b7280);
-    font-size: 14px;
+    font-size: 13px;
     white-space: nowrap;
   }
   .traces-table-wrap {

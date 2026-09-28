@@ -55,7 +55,65 @@
 .workspace-page .plot-container {
   box-shadow: var(--shadow-drop, 0 1px 2px rgba(0, 0, 0, 0.05));
 }
-.workspace-page :where(button, a, input, select, summary):focus-visible {
+.ui-select {
+  --ui-select-chevron: var(--body-text-color-subdued, #6b7280);
+  box-sizing: border-box;
+  height: 31px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0 30px 0 10px;
+  border: 1px solid var(--border-color-primary, #e5e7eb);
+  border-radius: var(--input-radius, 8px);
+  background-color: var(--input-background-fill, white);
+  background-image:
+    linear-gradient(
+      45deg,
+      transparent calc(50% - 0.5px),
+      var(--ui-select-chevron) calc(50% - 0.5px),
+      var(--ui-select-chevron) calc(50% + 0.5px),
+      transparent calc(50% + 0.5px)
+    ),
+    linear-gradient(
+      135deg,
+      transparent calc(50% - 0.5px),
+      var(--ui-select-chevron) calc(50% - 0.5px),
+      var(--ui-select-chevron) calc(50% + 0.5px),
+      transparent calc(50% + 0.5px)
+    );
+  background-position:
+    calc(100% - 16px) calc(50% + 1px),
+    calc(100% - 11px) calc(50% + 1px);
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+  color: var(--body-text-color, #1f2937);
+  font: inherit;
+  font-size: 13px;
+  line-height: normal;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.ui-select:hover {
+  border-color: color-mix(in srgb, var(--body-text-color, #1f2937) 25%, var(--border-color-primary, #e5e7eb));
+}
+.ui-select:focus {
+  outline: none;
+}
+.ui-select:focus-visible {
+  border-color: var(--input-border-color-focus, #fdba74);
+  box-shadow: 0 0 0 2px var(--primary-50, #fff7ed);
+}
+.ui-select:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.ui-select option {
+  background: var(--background-fill-primary, white);
+  color: var(--body-text-color, #1f2937);
+}
+.workspace-page :where(button, a, input, select:not(.ui-select), summary):focus-visible {
   outline: 2px solid var(--color-accent, #f97316);
   outline-offset: 3px;
 }
