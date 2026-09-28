@@ -1,5 +1,7 @@
 <script>
   import ArtifactVersionDetail from "../components/ArtifactVersionDetail.svelte";
+  import Quickstart from "../components/Quickstart.svelte";
+  import { artifactsGuide } from "../lib/quickstarts.js";
 
   let {
     project = null,
@@ -10,6 +12,9 @@
 </script>
 
 <div class="detail-pane workspace-page">
+  {#if project}
+    <Quickstart guide={artifactsGuide(project)} collapsible={true} />
+  {/if}
   {#if selection}
     {#key `${selection.name}@v${selection.version}`}
       <ArtifactVersionDetail

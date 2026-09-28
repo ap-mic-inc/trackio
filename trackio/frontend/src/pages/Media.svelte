@@ -1,5 +1,7 @@
 <script>
   import PageHeader from "../components/PageHeader.svelte";
+  import Quickstart from "../components/Quickstart.svelte";
+  import { mediaGuide } from "../lib/quickstarts.js";
   import CodeSnippet from "../components/CodeSnippet.svelte";
   import LoadingTrackio from "../components/LoadingTrackio.svelte";
   import Object3DCard from "../components/Object3DCard.svelte";
@@ -335,6 +337,9 @@
 
 <div class="media-page workspace-page">
   <PageHeader title="Media & Tables" description="Explore images, audio, video, and tables from your selected runs." />
+  {#if project}
+    <Quickstart guide={mediaGuide(project)} collapsible={true} />
+  {/if}
   {#if loading}
     <LoadingTrackio />
   {:else if !hasMedia}

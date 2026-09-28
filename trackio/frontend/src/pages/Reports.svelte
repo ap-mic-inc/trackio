@@ -1,5 +1,7 @@
 <script>
   import PageHeader from "../components/PageHeader.svelte";
+  import Quickstart from "../components/Quickstart.svelte";
+  import { reportsGuide } from "../lib/quickstarts.js";
   import LoadingTrackio from "../components/LoadingTrackio.svelte";
   import { getAlerts, getLogs } from "../lib/api.js";
 
@@ -119,6 +121,9 @@
 
 <div class="reports-page workspace-page">
   <PageHeader title="Alerts & Reports" description="Review training alerts and reports from your selected runs." />
+  {#if project}
+    <Quickstart guide={reportsGuide(project)} collapsible={true} />
+  {/if}
   {#if loading}
     <LoadingTrackio />
   {:else if allAlerts.length === 0 && markdownReports.length === 0}

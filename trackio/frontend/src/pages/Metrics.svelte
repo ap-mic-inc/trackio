@@ -1,5 +1,7 @@
 <script>
   import PageHeader from "../components/PageHeader.svelte";
+  import Quickstart from "../components/Quickstart.svelte";
+  import { metricsGuide } from "../lib/quickstarts.js";
   import CodeSnippet from "../components/CodeSnippet.svelte";
   import { onMount } from "svelte";
   import { getQueryParam, navigateTo } from "../lib/router.js";
@@ -492,6 +494,9 @@
 
 <div class="metrics-page workspace-page" bind:this={pageElement}>
   <PageHeader title="Metrics" description="Compare training progress across your selected runs." />
+  {#if project}
+    <Quickstart guide={metricsGuide(project)} collapsible={true} />
+  {/if}
   {#if !appBootstrapReady || !hasLoaded}
     <LoadingTrackio />
   {:else if !project}

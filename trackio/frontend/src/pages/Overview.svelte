@@ -2,7 +2,8 @@
   import PageHeader from "../components/PageHeader.svelte";
   import CodeSnippet from "../components/CodeSnippet.svelte";
   import LoadingTrackio from "../components/LoadingTrackio.svelte";
-  import ProjectRunGuides from "../components/ProjectRunGuides.svelte";
+  import Quickstart from "../components/Quickstart.svelte";
+  import { overviewGuide } from "../lib/quickstarts.js";
   import RunSummaryHeader from "../components/RunSummaryHeader.svelte";
   import { getRunStatus, getRunSummary } from "../lib/api.js";
   import { buildColorMap } from "../lib/stores.js";
@@ -323,7 +324,7 @@
     count={statusRuns ? statusRuns.length : null}
   />
   {#if project}
-    <ProjectRunGuides {project} collapsible={true} />
+    <Quickstart guide={overviewGuide(project)} collapsible={true} />
   {/if}
   <div class="sync-bar">
     <div class="sync-info" role="status">

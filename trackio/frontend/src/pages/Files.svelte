@@ -1,5 +1,7 @@
 <script>
   import PageHeader from "../components/PageHeader.svelte";
+  import Quickstart from "../components/Quickstart.svelte";
+  import { filesGuide } from "../lib/quickstarts.js";
   import CodeSnippet from "../components/CodeSnippet.svelte";
   import LoadingTrackio from "../components/LoadingTrackio.svelte";
   import { getFileUrl, getProjectFiles } from "../lib/api.js";
@@ -72,6 +74,9 @@
 
 <div class="files-page workspace-page">
   <PageHeader title="Files" description="Browse, preview, and download files saved across this project." count={loading ? null : files.length} />
+  {#if project}
+    <Quickstart guide={filesGuide(project)} collapsible={true} />
+  {/if}
   {#if loading}
     <LoadingTrackio />
   {:else if files.length === 0}

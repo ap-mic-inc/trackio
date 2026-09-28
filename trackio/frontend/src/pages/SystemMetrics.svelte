@@ -1,5 +1,7 @@
 <script>
   import PageHeader from "../components/PageHeader.svelte";
+  import Quickstart from "../components/Quickstart.svelte";
+  import { systemGuide } from "../lib/quickstarts.js";
   import CodeSnippet from "../components/CodeSnippet.svelte";
   import { onMount } from "svelte";
   import LinePlot from "../components/LinePlot.svelte";
@@ -521,6 +523,9 @@
 
 <div class="system-page workspace-page">
   <PageHeader title="System Metrics" description="Monitor resource usage and performance across your selected runs." />
+  {#if project}
+    <Quickstart guide={systemGuide(project)} collapsible={true} />
+  {/if}
   {#if !appBootstrapReady || (!hasLoaded && !loadError)}
     <LoadingTrackio />
   {:else if loadError && !hasLoaded}

@@ -1,5 +1,7 @@
 <script>
   import PageHeader from "../components/PageHeader.svelte";
+  import Quickstart from "../components/Quickstart.svelte";
+  import { tracesGuide } from "../lib/quickstarts.js";
   import LoadingTrackio from "../components/LoadingTrackio.svelte";
   import { getMediaUrl, getTraces, getTraceSteps } from "../lib/api.js";
   import {
@@ -421,6 +423,9 @@
 
 <div class="traces-page workspace-page">
   <PageHeader title="Traces" description="Inspect requests, timing, and individual operations." />
+  {#if project}
+    <Quickstart guide={tracesGuide(project)} collapsible={true} />
+  {/if}
   {#if !project}
     <div class="empty-state">
       <h2>Select a project</h2>
