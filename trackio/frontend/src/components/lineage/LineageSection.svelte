@@ -1,11 +1,16 @@
 <script>
   import { getArtifactLineage } from "../../lib/api.js";
-  import { clusterLineage } from "../../lib/lineage.js";
+  import { clusterLineage, resolveLineageFocus } from "../../lib/lineage.js";
   import { layoutLineage, SMOOTH_EDGE_LIMIT } from "../../lib/lineageLayout.js";
   import LineageGraph from "./LineageGraph.svelte";
   import LineagePreview from "./LineagePreview.svelte";
 
-  let { project = null, versionId = null, onOpenVersion = null } = $props();
+  let {
+    project = null,
+    versionId = null,
+    focusRun = null,
+    onOpenVersion = null,
+  } = $props();
 
   let graph = $state(null);
   let loading = $state(true);
@@ -14,7 +19,8 @@
   let selectedId = $state(null);
   let loadGeneration = 0;
 
-  const focusId = $derived(`art:${versionId}`);
+  const focusId = $derived(resolveLineageFocus(graph, versionId, focusRun));
+  const focusIsRun = $derived(focusId.startsWith("run:"));
 
   $effect(() => {
     loadGraph();
@@ -24,7 +30,6 @@
     const generation = ++loadGeneration;
     const requestProject = project;
     const requestVersionId = versionId;
-    const requestFocusId = `art:${requestVersionId}`;
 
     if (!requestProject || requestVersionId == null) {
       graph = null;
@@ -45,7 +50,7 @@
       );
       if (generation !== loadGeneration) return;
       graph = nextGraph;
-      selectedId = requestFocusId;
+      selectedId = resolveLineageFocus(nextGraph, requestVersionId, focusRun);
     } catch {
       if (generation !== loadGeneration) return;
       error = true;
@@ -95,7 +100,9 @@
 {:else if error}
   <div class="status">Failed to load lineage.</div>
 {:else if !graph || graph.edges.length === 0}
-  <div class="status">No lineage recorded for this version.</div>
+  <div class="status">
+    No lineage recorded for this {focusRun ? "run" : "version"}.
+  </div>
 {:else}
   <div class="lineage">
     {#if graph.truncated}
@@ -124,7 +131,7 @@
                 class="target-dot"
                 r="2"
               /></svg
-            >Base Artifact</span
+            >{focusIsRun ? "This run" : "Base Artifact"}</span
           >
           <span class="legend-item"
             ><span class="swatch artifact"></span>Artifact</span

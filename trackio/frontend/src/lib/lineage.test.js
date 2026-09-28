@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { golden, goldenTables } from "./__fixtures__/lineageGolden.js";
 import {
+  resolveLineageFocus,
   buildLineage,
   buildRunOwnership,
   canonicalLinkRunId,
@@ -415,5 +416,30 @@ describe("clusterLineage", () => {
     const b = clusterLineage(graph, "art:1");
     expect(a.nodes.map((n) => n.id)).toEqual(b.nodes.map((n) => n.id));
     expect(a.edges).toEqual(b.edges);
+  });
+});
+
+describe("resolveLineageFocus", () => {
+  const graph = {
+    nodes: [
+      { id: "art:1", kind: "artifact" },
+      { id: "run:abc", kind: "run", run_id: "abc", run_name: "train" },
+      { id: "run:name:eval", kind: "run", run_id: null, run_name: "eval" },
+    ],
+  };
+
+  test("focuses the artifact when no run is given", () => {
+    expect(resolveLineageFocus(graph, 1)).toBe("art:1");
+  });
+
+  test("focuses the run by id, then by name", () => {
+    expect(resolveLineageFocus(graph, 1, { id: "abc", name: "renamed" })).toBe("run:abc");
+    expect(resolveLineageFocus(graph, 1, { id: null, name: "eval" })).toBe("run:name:eval");
+    expect(resolveLineageFocus(graph, 1, { id: "zzz", name: "train" })).toBe("run:abc");
+  });
+
+  test("falls back to the artifact when the run is not in the graph", () => {
+    expect(resolveLineageFocus(graph, 1, { id: "zzz", name: "zzz" })).toBe("art:1");
+    expect(resolveLineageFocus(null, 7, { id: "abc" })).toBe("art:7");
   });
 });

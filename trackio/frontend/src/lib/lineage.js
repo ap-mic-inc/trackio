@@ -305,3 +305,12 @@ export function clusterLineage(graph, focusId, options = {}) {
 
   return { nodes, edges };
 }
+
+export function resolveLineageFocus(graph, versionId, run = null) {
+  const fallback = `art:${versionId}`;
+  if (!run || !graph?.nodes) return fallback;
+  const runs = graph.nodes.filter((node) => node.kind === "run");
+  const byId = run.id != null ? runs.find((node) => node.run_id === run.id) : null;
+  const byName = run.name != null ? runs.find((node) => node.run_name === run.name) : null;
+  return (byId ?? byName)?.id ?? fallback;
+}

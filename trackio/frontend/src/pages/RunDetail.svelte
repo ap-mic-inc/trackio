@@ -18,6 +18,19 @@
   let loading = $state(false);
   let runArtifacts = $state({ input: [], output: [] });
   let expandedArtifact = $state({});
+  let LineageSection = $state(null);
+
+  let lineageVersionId = $derived(
+    (runArtifacts.output[0] ?? runArtifacts.input[0])?.version_id ?? null,
+  );
+
+  $effect(() => {
+    if (lineageVersionId != null && !LineageSection) {
+      import("../components/lineage/LineageSection.svelte").then((m) => {
+        LineageSection = m.default;
+      });
+    }
+  });
 
   function toggleArtifact(key) {
     expandedArtifact[key] = !expandedArtifact[key];
@@ -189,11 +202,41 @@
           {/each}
         </div>
       {/if}
+
+      {#if lineageVersionId != null && LineageSection}
+        <h3>Lineage</h3>
+        <p class="lineage-desc">
+          Artifacts this run consumed and produced, and the runs connected through them.
+        </p>
+        <div class="run-lineage">
+          {#key `${runId ?? runName}:${lineageVersionId}`}
+            <LineageSection
+              {project}
+              versionId={lineageVersionId}
+              focusRun={{ id: runId, name: runName }}
+              onOpenVersion={(name, version) => openInArtifacts(name, version)}
+            />
+          {/key}
+        </div>
+      {/if}
     </div>
   {/if}
 </div>
 
 <style>
+  .lineage-desc {
+    margin: -4px 0 10px;
+    color: var(--body-text-color-subdued, #6b7280);
+    font-size: 12px;
+  }
+  .run-lineage {
+    display: flex;
+    flex-direction: column;
+    height: 440px;
+    border: 1px solid var(--border-color-primary, #e5e7eb);
+    border-radius: var(--radius-lg, 8px);
+    overflow: hidden;
+  }
   .run-detail-page {
     padding: 20px 24px;
     overflow-y: auto;

@@ -118,7 +118,7 @@
             >Open version</button
           >
         {/if}
-      {:else if node.kind === "run"}
+      {:else if node.kind === "run" && node.id !== focusId}
         <button
           class="open-btn"
           onclick={() => openRunDetail(node.run_name, node.run_id)}
