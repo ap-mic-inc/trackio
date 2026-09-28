@@ -1,9 +1,12 @@
 <script>
   import { onMount, tick } from "svelte";
-  import embed from "vega-embed";
-  import * as vega from "vega";
+  import { loadVega, getVega } from "../lib/vegaLoader.js";
   import { buildColorSpecKey } from "../lib/dataProcessing.js";
   import { visibleLegendEntries } from "../lib/legend.js";
+  import {
+    createVegaViewManager,
+    observeNearViewport,
+  } from "../lib/chartLifecycle.js";
   import { escapeVegaField } from "../lib/vega.js";
 
   let {
@@ -31,8 +34,9 @@
   let container = $state(null);
   let plotContainer = $state(null);
   let fullscreenHost = $state(null);
-  let view = $state(null);
   let fullscreen = $state(false);
+  let nearViewport = $state(false);
+  const viewManager = createVegaViewManager();
 
   let lastStructuralKey = null;
   let lastHasSmoothed = false;
@@ -273,7 +277,7 @@
     return {
       $schema: "https://vega.github.io/schema/vega-lite/v5.json",
       width: "container",
-      height: fullscreen ? "container" : 250,
+      height: fullscreen ? "container" : 220,
       autosize: { type: "fit", contains: "padding" },
       layer: layers,
       ...(onSelect
@@ -320,11 +324,13 @@
   }
 
   function replaceDataset(v, name, newData) {
+    const { vega } = getVega();
     const cs = vega.changeset().remove(vega.truthy).insert(newData);
     v.change(name, cs);
   }
 
   function tryIncrementalUpdate() {
+    const view = viewManager.current;
     if (!view) return false;
 
     const { originalData, smoothedData, hasSmoothed } = splitData();
@@ -348,6 +354,7 @@
   }
 
   function syncViewSize() {
+    const view = viewManager.current;
     if (!view || !container) return;
     view.width(container.clientWidth);
     if (fullscreen) view.height(container.clientHeight);
@@ -356,22 +363,35 @@
 
   async function fullRender() {
     await tick();
-    if (!container || !data || data.length === 0 || !y) return;
+    if (!nearViewport || !container || !data || data.length === 0 || !y) {
+      viewManager.clear();
+      lastStructuralKey = null;
+      return;
+    }
 
+    const target = container;
     const spec = buildSpec();
+    const structuralKey = getStructuralKey();
 
     try {
-      if (view) {
-        view.finalize();
-        view = null;
+      const result = await viewManager.replace(
+        async () => {
+          const { embed } = await loadVega();
+          return embed(target, spec, {
+            actions: false,
+            renderer: "canvas",
+          });
+        },
+        target,
+      );
+      if (!result || target !== container) {
+        if (result) viewManager.clear();
+        return;
       }
-      const result = await embed(container, spec, {
-        actions: false,
-        renderer: "canvas",
+      lastStructuralKey = structuralKey;
+      requestAnimationFrame(() => {
+        if (viewManager.current === result.view) syncViewSize();
       });
-      view = result.view;
-      lastStructuralKey = getStructuralKey();
-      requestAnimationFrame(syncViewSize);
 
       if (onSelect) {
         let lastSelectTime = 0;
@@ -394,10 +414,14 @@
   }
 
   async function render() {
-    if (!container || !data || data.length === 0 || !y) return;
+    if (!nearViewport || !container || !data || data.length === 0 || !y) {
+      viewManager.clear();
+      lastStructuralKey = null;
+      return;
+    }
 
     const structuralKey = getStructuralKey();
-    if (view && structuralKey === lastStructuralKey) {
+    if (viewManager.current && structuralKey === lastStructuralKey) {
       if (tryIncrementalUpdate()) return;
     }
 
@@ -433,6 +457,7 @@
   }
 
   async function downloadImage() {
+    const view = viewManager.current;
     if (!view) return;
     try {
       const url = await view.toImageURL("png", 4);
@@ -542,7 +567,15 @@
     title;
     fullscreen;
     container;
+    nearViewport;
     render();
+  });
+
+  $effect(() => {
+    if (!container) return;
+    return observeNearViewport(container, (visible) => {
+      nearViewport = visible;
+    });
   });
 
   $effect(() => {
@@ -564,7 +597,7 @@
       document.removeEventListener("webkitfullscreenchange", onFullscreenChange);
       document.removeEventListener("mozfullscreenchange", onFullscreenChange);
       document.removeEventListener("MSFullscreenChange", onFullscreenChange);
-      if (view) view.finalize();
+      viewManager.destroy();
       document.body.style.overflow = "";
     };
   });
@@ -579,6 +612,7 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
   class="plot-container"
+  data-metric={y}
   class:hidden-plot={fullscreen}
   bind:this={plotContainer}
   draggable={draggable ? "true" : undefined}
@@ -836,6 +870,7 @@
     padding: 12px;
     overflow: hidden;
     position: relative;
+    isolation: isolate;
   }
   .plot-container[draggable="true"] {
     cursor: grab;
@@ -854,8 +889,8 @@
   }
   .drag-handle {
     position: absolute;
-    top: 8px;
-    left: 8px;
+    top: 13px;
+    left: 3px;
     color: var(--body-text-color-subdued, #9ca3af);
     opacity: 0;
     transition: opacity 0.15s;
@@ -938,18 +973,22 @@
     filter: drop-shadow(0 0 0.5px rgba(255, 255, 255, 0.95));
   }
   .plot-title {
-    font-size: 13px;
+    font-size: 12.5px;
     font-weight: 600;
+    letter-spacing: -0.01em;
     color: var(--body-text-color, #374151);
-    text-align: center;
-    padding: 0 0 6px;
+    text-align: left;
+    padding: 2px 96px 10px 18px;
     word-break: break-word;
   }
   .plot-title--fs {
     flex-shrink: 0;
+    text-align: center;
+    padding: 0 0 6px;
   }
   .plot {
     width: 100%;
+    min-height: 0;
   }
   .plot :global(.vega-embed) {
     width: 100% !important;
@@ -1020,6 +1059,11 @@
     gap: 12px;
     padding: 6px 0 0;
     flex-wrap: wrap;
+  }
+  .plot-container .custom-legend {
+    justify-content: flex-start;
+    padding: 8px 6px 0 18px;
+    opacity: 1;
   }
   .legend-title {
     font-size: 11px;

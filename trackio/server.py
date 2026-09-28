@@ -13,6 +13,7 @@ import time
 import warnings
 from collections import deque
 from collections.abc import Callable
+from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -24,7 +25,10 @@ from starlette.requests import Request
 from starlette.responses import RedirectResponse
 from starlette.routing import Route
 
+import trackio.auth_store as auth_store
 import trackio.cas as cas
+import trackio.local_auth as local_auth
+import trackio.oidc as oidc
 import trackio.references as references
 import trackio.utils as utils
 from trackio.asgi_app import (
@@ -102,12 +106,6 @@ def _inbox_poll_loop() -> None:
 
 def start_inbox_poller() -> None:
     global _inbox_poller_thread
-    try:
-        from trackio import fragments  # noqa: PLC0415
-
-        fragments.import_inbox_dir()
-    except Exception as e:
-        logger.warning("inbox fragment import at startup failed: %s", e)
     with _inbox_poller_lock:
         if _inbox_poller_thread is not None and _inbox_poller_thread.is_alive():
             return
@@ -363,6 +361,7 @@ def oauth_logout(request: Request):
         samesite="none" if _on_spaces else "lax",
         secure=_on_spaces,
     )
+    oidc.clear_session_cookie(request, resp)
     return resp
 
 
@@ -454,16 +453,53 @@ def check_write_access(request: Request, token: str) -> bool:
     return False
 
 
+def _has_oidc_write_access(request: Request) -> bool:
+    session = oidc.get_oidc_session(request)
+    return session is not None and session.can_write
+
+
+def _is_admin(request: Request) -> bool:
+    if check_write_access(request, write_token):
+        return True
+    session = oidc.get_oidc_session(request)
+    return session is not None and session.is_admin
+
+
+def assert_is_admin(request: Request) -> None:
+    if _is_admin(request):
+        return
+    raise TrackioAPIError(
+        "Admin access is required. Sign in via OIDC as an admin user, or use "
+        "the write-access URL from trackio.show()."
+    )
+
+
+def _record_write_activity(request: Request, projects: Any, action: str) -> None:
+    if on_spaces():
+        return
+    if isinstance(projects, str):
+        projects = [projects]
+    session = oidc.get_oidc_session(request)
+    actor = session.sub if session is not None else auth_store.WRITE_TOKEN_ACTOR
+    try:
+        for project in {p for p in projects if p}:
+            auth_store.record_activity(actor, project, action)
+    except Exception as e:
+        logger.warning("failed to record write activity: %s", e)
+
+
 def assert_can_write_metrics(request: Request, hf_token: str | None) -> None:
     if on_spaces():
         check_hf_token_has_write_access(hf_token)
     else:
         if check_write_access(request, write_token):
             return
+        if _has_oidc_write_access(request):
+            return
         raise TrackioAPIError(
             "A write_token is required to log metrics or upload to this server. "
             "Use the write-access URL from trackio.show(), set TRACKIO_WRITE_TOKEN, "
-            "or send header X-Trackio-Write-Token."
+            "send header X-Trackio-Write-Token, or sign in via OIDC with write access."
         )
 
 
@@ -471,10 +507,12 @@ def assert_can_stage_upload(request: Request) -> None:
     if not on_spaces():
         if check_write_access(request, write_token):
             return
+        if _has_oidc_write_access(request):
+            return
         raise TrackioAPIError(
             "A write_token is required to upload files to this server. "
             "Use the write-access URL from trackio.show(), set TRACKIO_WRITE_TOKEN, "
-            "or send header X-Trackio-Write-Token."
+            "send header X-Trackio-Write-Token, or sign in via OIDC with write access."
         )
 
     bearer_token = _authorization_bearer_token(request)
@@ -505,9 +543,12 @@ def assert_can_mutate_runs(request: Request) -> None:
     if not on_spaces():
         if check_write_access(request, write_token):
             return
+        if _has_oidc_write_access(request):
+            return
         raise TrackioAPIError(
             "A write_token is required to delete or rename runs. "
-            "Open the dashboard using the link that includes the write_token query parameter."
+            "Open the dashboard using the link that includes the write_token "
+            "query parameter, or sign in via OIDC with write access."
         )
     hf_tok = _hf_access_token(request)
     if hf_tok is not None:
@@ -526,9 +567,40 @@ def assert_can_mutate_runs(request: Request) -> None:
 
 def get_run_mutation_status(request: Request) -> dict[str, Any]:
     if not on_spaces():
+        session = oidc.get_oidc_session(request)
+        oidc_on = oidc.oidc_enabled()
+        user = session.display_name if session is not None else None
+        admin = _is_admin(request)
         if check_write_access(request, write_token):
-            return {"spaces": False, "allowed": True, "auth": "local"}
-        return {"spaces": False, "allowed": False, "auth": "none"}
+            return {
+                "spaces": False,
+                "allowed": True,
+                "auth": "local",
+                "oidc_enabled": oidc_on,
+                "login_enabled": True,
+                "user": user,
+                "admin": True,
+            }
+        if session is not None:
+            return {
+                "spaces": False,
+                "allowed": session.can_write,
+                "auth": "oidc" if session.can_write else "oidc_insufficient",
+                "oidc_enabled": oidc_on,
+                "login_enabled": True,
+                "user": user,
+                "admin": admin,
+            }
+        return {
+            "spaces": False,
+            "allowed": False,
+            "auth": "none",
+            "oidc_enabled": oidc_on,
+            "login_enabled": True,
+            "setup_available": local_auth.setup_available(),
+            "user": None,
+            "admin": False,
+        }
     hf_tok = _hf_access_token(request)
     if hf_tok is not None:
         try:
@@ -608,6 +680,9 @@ def bulk_upload_media(
     hf_token: str | None,
 ) -> None:
     assert_can_write_metrics(request, hf_token)
+    _record_write_activity(
+        request, [upload.get("project") for upload in uploads], "upload"
+    )
 
     def _write(upload: UploadEntry, src: Path) -> None:
         media_path = get_project_media_path(
@@ -668,15 +743,21 @@ def artifact_log(
     run_name: str | None,
     run_id: str | None,
     hf_token: str | None,
+    overwrite: bool = False,
 ) -> dict[str, Any]:
     assert_can_write_metrics(request, hf_token)
     project = _validate_project_name(project)
+    _record_write_activity(request, project, "artifact")
     try:
         cas.validate_artifact_name(name)
     except ValueError as err:
         raise TrackioAPIError(str(err)) from err
     if not isinstance(type, str) or not type:
         raise TrackioAPIError(f"Artifact type must be a non-empty string, got {type!r}")
+    if not isinstance(overwrite, bool):
+        raise TrackioAPIError(
+            f"Artifact overwrite must be a boolean, got {overwrite!r}"
+        )
     try:
         aliases = cas.validate_aliases(aliases)
     except ValueError as err:
@@ -730,6 +811,7 @@ def artifact_log(
         aliases=aliases,
         run_name=run_name,
         run_id=run_id,
+        overwrite=overwrite,
     )
 
 
@@ -805,6 +887,7 @@ def log(
     run_id: str | None = None,
 ) -> None:
     assert_can_write_metrics(request, hf_token)
+    _record_write_activity(request, project, "log")
     SQLiteStorage.log(
         project=project, run=run, run_id=run_id, metrics=metrics, step=step
     )
@@ -816,6 +899,7 @@ def bulk_log(
     hf_token: str | None,
 ) -> None:
     assert_can_write_metrics(request, hf_token)
+    _record_write_activity(request, [entry.get("project") for entry in logs], "log")
 
     logs_by_run = {}
     for log_entry in logs:
@@ -856,6 +940,7 @@ def bulk_log_system(
     hf_token: str | None,
 ) -> None:
     assert_can_write_metrics(request, hf_token)
+    _record_write_activity(request, [entry.get("project") for entry in logs], "log")
 
     logs_by_run = {}
     for log_entry in logs:
@@ -948,6 +1033,7 @@ def get_metric_values(
     at_time: str | None = None,
     window: int | None = None,
     run_id: str | None = None,
+    max_points: int | None = None,
 ) -> list[dict[str, Any]]:
     return SQLiteStorage.get_metric_values(
         project,
@@ -958,6 +1044,7 @@ def get_metric_values(
         at_time=at_time,
         window=window,
         run_id=run_id,
+        max_points=max_points,
     )
 
 
@@ -1003,6 +1090,15 @@ def get_project_summary(project: str) -> dict[str, Any]:
         "num_runs": len(runs),
         "runs": runs,
         "last_activity": max(last_steps.values()) if last_steps else None,
+    }
+
+
+def get_run_status(project: str) -> dict[str, Any]:
+    runs = SQLiteStorage.get_run_status(project)
+    return {
+        "server_time": datetime.now(timezone.utc).isoformat(),
+        "tail_rows": 50,
+        "runs": runs,
     }
 
 
@@ -1329,6 +1425,7 @@ def delete_run(
     run_id: str | None = None,
 ) -> bool:
     assert_can_mutate_runs(request)
+    _record_write_activity(request, project, "manage")
     return SQLiteStorage.delete_run(project, run, run_id=run_id)
 
 
@@ -1340,8 +1437,153 @@ def rename_run(
     run_id: str | None = None,
 ) -> bool:
     assert_can_mutate_runs(request)
+    _record_write_activity(request, project, "manage")
     SQLiteStorage.rename_run(project, old_name, new_name, run_id=run_id)
     return True
+
+
+def admin_get_users(request: Request) -> dict[str, Any]:
+    """List signed-in users, their permissions, and per-project write
+    activity. Admin only."""
+    assert_is_admin(request)
+    return {
+        "users": auth_store.list_users(),
+        "write_token_projects": auth_store.write_token_projects(),
+        "oidc_enabled": oidc.oidc_enabled(),
+        "auth_required": oidc.auth_required(),
+    }
+
+
+def admin_revoke_user_sessions(request: Request, sub: str) -> dict[str, Any]:
+    """Sign a user out everywhere by revoking their sessions. Admin only."""
+    assert_is_admin(request)
+    return {"revoked": oidc.revoke_sessions_for_sub(sub)}
+
+
+def admin_create_user(
+    request: Request, username: str, password: str, role: str = "write"
+) -> dict[str, Any]:
+    """Create a password-based local account with the given role. Admin
+    only."""
+    assert_is_admin(request)
+    sub, error = local_auth.create_local_account(username, password, role)
+    if error:
+        raise TrackioAPIError(error)
+    return {"sub": sub, "username": username, "role": role}
+
+
+def admin_reset_password(request: Request, sub: str, password: str) -> dict[str, Any]:
+    """Reset a local account's password. Admin only."""
+    assert_is_admin(request)
+    if not auth_store.is_local_sub(sub):
+        raise TrackioAPIError(
+            "Passwords can only be reset for local accounts, not OIDC users."
+        )
+    if len(password or "") < local_auth.MIN_PASSWORD_LENGTH:
+        raise TrackioAPIError(
+            f"Password must be at least {local_auth.MIN_PASSWORD_LENGTH} characters."
+        )
+    if not auth_store.set_password_hash(sub, local_auth.hash_password(password)):
+        raise TrackioAPIError(f"Unknown user: {sub!r}")
+    return {"sub": sub, "reset": True}
+
+
+_AUTH_SETTINGS_STRING_FIELDS = (
+    "issuer",
+    "client_id",
+    "scopes",
+    "groups_claim",
+    "allowed_users",
+    "allowed_groups",
+    "write_users",
+    "write_groups",
+    "admin_users",
+    "admin_groups",
+)
+
+
+def _auth_settings_payload() -> dict[str, Any]:
+    stored = auth_store.get_setting(oidc.AUTH_SETTINGS_KEY)
+    settings = stored if isinstance(stored, dict) else {}
+    payload: dict[str, Any] = {
+        field: str(settings.get(field) or "") for field in _AUTH_SETTINGS_STRING_FIELDS
+    }
+    payload["auth_required"] = bool(settings.get("auth_required"))
+    payload["client_secret_set"] = bool(settings.get("client_secret"))
+    payload["source"] = "db" if isinstance(stored, dict) else "env"
+    payload["oidc_active"] = oidc.oidc_enabled()
+    payload["auth_required_active"] = oidc.auth_required()
+    return payload
+
+
+def admin_get_auth_settings(request: Request) -> dict[str, Any]:
+    """Current OIDC/security settings (the client secret itself is never
+    returned). Admin only."""
+    assert_is_admin(request)
+    return _auth_settings_payload()
+
+
+def admin_set_auth_settings(
+    request: Request, settings: dict[str, Any]
+) -> dict[str, Any]:
+    """Save OIDC/security settings from the Admin page. OIDC sign-in is
+    active whenever an issuer URL and client ID are saved; when both are
+    empty, TRACKIO_OIDC_* environment variables act as a fallback. An empty
+    client_secret keeps the previously stored secret. Admin only."""
+    assert_is_admin(request)
+    if not isinstance(settings, dict):
+        raise TrackioAPIError("settings must be an object")
+    stored = auth_store.get_setting(oidc.AUTH_SETTINGS_KEY)
+    current = stored if isinstance(stored, dict) else {}
+    new: dict[str, Any] = {
+        field: str(settings.get(field) or "").strip()
+        for field in _AUTH_SETTINGS_STRING_FIELDS
+    }
+    secret = str(settings.get("client_secret") or "")
+    new["client_secret"] = secret if secret else str(current.get("client_secret") or "")
+    new["auth_required"] = bool(settings.get("auth_required"))
+    if bool(new["issuer"]) != bool(new["client_id"]):
+        raise TrackioAPIError(
+            "OIDC sign-in requires both an issuer URL and a client ID."
+        )
+    auth_store.set_setting(oidc.AUTH_SETTINGS_KEY, new)
+    return _auth_settings_payload()
+
+
+def admin_test_oidc(request: Request, issuer: str | None = None) -> dict[str, Any]:
+    """Fetch the OIDC discovery document for the given (or configured)
+    issuer to verify connectivity. Admin only."""
+    assert_is_admin(request)
+    issuer = (issuer or "").strip().rstrip("/")
+    if not issuer:
+        config = oidc.load_oidc_config()
+        if config is None:
+            raise TrackioAPIError("No issuer provided and OIDC is not configured.")
+        issuer = config.issuer
+    try:
+        doc = oidc._discover(issuer)
+    except Exception as e:
+        raise TrackioAPIError(f"Discovery failed for {issuer!r}: {e}") from e
+    return {
+        "issuer": issuer,
+        "authorization_endpoint": doc.get("authorization_endpoint"),
+        "token_endpoint": doc.get("token_endpoint"),
+        "userinfo_endpoint": doc.get("userinfo_endpoint"),
+    }
+
+
+def admin_set_role(request: Request, sub: str, role: str) -> dict[str, Any]:
+    """Assign a role override to a user: admin, write, read, or default
+    (fall back to the environment-configured permissions). Takes effect
+    immediately, including for the user's active sessions. Admin only."""
+    assert_is_admin(request)
+    if role not in (*oidc.ROLE_OVERRIDES, "default"):
+        raise TrackioAPIError("role must be one of: admin, write, read, default")
+    if auth_store.get_user(sub) is None:
+        raise TrackioAPIError(f"Unknown user: {sub!r}")
+    auth_store.set_role_override(sub, None if role == "default" else role)
+    permissions = oidc.refresh_user_permissions(sub)
+    return {"sub": sub, "role": role, **(permissions or {})}
 
 
 def force_sync() -> bool:
@@ -1389,6 +1631,7 @@ def _api_registry() -> dict[str, Any]:
         "get_metrics_for_run": get_metrics_for_run,
         "get_all_projects": get_all_projects,
         "get_project_summary": get_project_summary,
+        "get_run_status": get_run_status,
         "get_run_summary": get_run_summary,
         "get_system_metrics_for_run": get_system_metrics_for_run,
         "get_system_logs": get_system_logs,
@@ -1408,6 +1651,14 @@ def _api_registry() -> dict[str, Any]:
         "delete_run": delete_run,
         "rename_run": rename_run,
         "force_sync": force_sync,
+        "admin_get_users": admin_get_users,
+        "admin_revoke_user_sessions": admin_revoke_user_sessions,
+        "admin_set_role": admin_set_role,
+        "admin_create_user": admin_create_user,
+        "admin_reset_password": admin_reset_password,
+        "admin_get_auth_settings": admin_get_auth_settings,
+        "admin_set_auth_settings": admin_set_auth_settings,
+        "admin_test_oidc": admin_test_oidc,
     }
 
 
@@ -1430,6 +1681,8 @@ def build_starlette_app_only(
         Route(OAUTH_START_PATH, oauth_hf_start, methods=["GET"]),
         Route(OAUTH_CALLBACK_PATH, oauth_hf_callback, methods=["GET"]),
         Route("/oauth/logout", oauth_logout, methods=["GET"]),
+        *oidc.oidc_routes(),
+        *local_auth.local_auth_routes(),
     ]
     mcp_lifespan = None
     mcp_routes: list[Any] = []
@@ -1466,6 +1719,10 @@ def build_starlette_app_only(
     resolved_frontend = resolve_frontend_dir(frontend_dir)
     mount_frontend(starlette_app, frontend_dir=resolved_frontend.path)
     starlette_app.add_middleware(CompressionMiddleware)
+    starlette_app.add_middleware(
+        oidc.OidcAuthRequiredMiddleware,
+        write_token_checker=lambda req: check_write_access(req, write_token),
+    )
     start_inbox_poller()
     return starlette_app, write_token
 

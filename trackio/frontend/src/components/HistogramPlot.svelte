@@ -1,6 +1,10 @@
 <script>
   import { onMount, tick } from "svelte";
-  import embed from "vega-embed";
+  import { loadVega } from "../lib/vegaLoader.js";
+  import {
+    createVegaViewManager,
+    observeNearViewport,
+  } from "../lib/chartLifecycle.js";
 
   let {
     items = [],
@@ -11,8 +15,9 @@
 
   let container = $state(null);
   let fullscreenHost = $state(null);
-  let view = $state(null);
   let fullscreen = $state(false);
+  let nearViewport = $state(false);
+  const viewManager = createVegaViewManager();
 
   let legendEntries = $derived.by(() => {
     const seen = new Set();
@@ -85,7 +90,7 @@
     return {
       $schema: "https://vega.github.io/schema/vega-lite/v5.json",
       width: "container",
-      height: fullscreen ? "container" : 250,
+      height: fullscreen ? "container" : 220,
       autosize: { type: "fit", contains: "padding" },
       data: { values: barData },
       mark: {
@@ -139,25 +144,34 @@
 
   async function render() {
     await tick();
-    if (!container || !items || items.length === 0) return;
+    if (!nearViewport || !container || !items || items.length === 0) {
+      viewManager.clear();
+      return;
+    }
 
+    const target = container;
     const barData = getBarData();
     if (barData.length === 0) return;
 
     const spec = buildSpec(barData);
 
     try {
-      if (view) {
-        view.finalize();
-        view = null;
+      const result = await viewManager.replace(
+        async () => {
+          const { embed } = await loadVega();
+          return embed(target, spec, {
+            actions: false,
+            renderer: "canvas",
+          });
+        },
+        target,
+      );
+      if (!result || target !== container) {
+        if (result) viewManager.clear();
+        return;
       }
-      const result = await embed(container, spec, {
-        actions: false,
-        renderer: "canvas",
-      });
-      view = result.view;
       requestAnimationFrame(() => {
-        result.view.resize();
+        if (viewManager.current === result.view) result.view.resize();
       });
     } catch (e) {
       console.error("Vega render error:", e);
@@ -188,6 +202,7 @@
   }
 
   async function downloadImage() {
+    const view = viewManager.current;
     if (!view) return;
     try {
       const url = await view.toImageURL("png", 4);
@@ -239,7 +254,7 @@
       await requestFullscreenEl(fullscreenHost);
       await tick();
       relocateTooltipElement(fullscreenHost);
-      view?.resize();
+      viewManager.current?.resize();
     } catch {
       document.body.style.overflow = "";
       fullscreen = false;
@@ -276,7 +291,7 @@
       relocateTooltipElement(document.body);
     }
     if (active && fullscreen) {
-      tick().then(() => view?.resize());
+      tick().then(() => viewManager.current?.resize());
     }
   }
 
@@ -292,14 +307,22 @@
     title;
     fullscreen;
     container;
+    nearViewport;
     render();
+  });
+
+  $effect(() => {
+    if (!container) return;
+    return observeNearViewport(container, (visible) => {
+      nearViewport = visible;
+    });
   });
 
   $effect(() => {
     if (!container) return;
     const ro = new ResizeObserver(() => {
       queueMicrotask(() => {
-        view?.resize();
+        viewManager.current?.resize();
       });
     });
     ro.observe(container);
@@ -316,7 +339,7 @@
       document.removeEventListener("webkitfullscreenchange", onFullscreenChange);
       document.removeEventListener("mozfullscreenchange", onFullscreenChange);
       document.removeEventListener("MSFullscreenChange", onFullscreenChange);
-      if (view) view.finalize();
+      viewManager.destroy();
       document.body.style.overflow = "";
     };
   });
@@ -489,6 +512,7 @@
     padding: 12px;
     overflow: hidden;
     position: relative;
+    isolation: isolate;
   }
   .hidden-plot {
     visibility: hidden;
@@ -538,18 +562,22 @@
     flex-direction: column;
   }
   .plot-title {
-    font-size: 13px;
+    font-size: 12.5px;
     font-weight: 600;
+    letter-spacing: -0.01em;
     color: var(--body-text-color, #374151);
-    text-align: center;
-    padding: 0 0 6px;
+    text-align: left;
+    padding: 2px 96px 10px 6px;
     word-break: break-word;
   }
   .plot-title--fs {
     flex-shrink: 0;
+    text-align: center;
+    padding: 0 0 6px;
   }
   .plot {
     width: 100%;
+    min-height: 0;
   }
   .plot :global(.vega-embed) {
     width: 100% !important;
@@ -620,6 +648,11 @@
     gap: 12px;
     padding: 6px 0 0;
     flex-wrap: wrap;
+  }
+  .plot-container .custom-legend {
+    justify-content: flex-start;
+    padding: 8px 6px 0 6px;
+    opacity: 1;
   }
   .legend-item {
     display: flex;

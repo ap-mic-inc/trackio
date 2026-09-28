@@ -1,6 +1,11 @@
 from pathlib import Path
 
-from trackio.frontend_server import _render_index_html
+from starlette.applications import Starlette
+from starlette.responses import PlainTextResponse
+from starlette.routing import Route
+from starlette.testclient import TestClient
+
+from trackio.frontend_server import FrontendMiddleware, _render_index_html
 
 _HTML = """<!DOCTYPE html>
 <html><head>
@@ -42,3 +47,32 @@ def test_render_index_html_live_reload_endpoint_is_prefixed(tmp_path):
 def test_render_index_html_live_reload_endpoint_unprefixed_by_default(tmp_path):
     out = _render_index_html(_write_html(tmp_path))
     assert '"/__trackio/frontend_version"' in out
+
+
+def _client_with_middleware(tmp_path: Path) -> TestClient:
+    index_html_path = _write_html(tmp_path)
+
+    async def file_handler(request):
+        return PlainTextResponse("file-endpoint")
+
+    app = Starlette(routes=[Route("/file", file_handler, methods=["GET"])])
+    app.add_middleware(
+        FrontendMiddleware,
+        frontend_root=tmp_path,
+        index_html_path=index_html_path,
+    )
+    return TestClient(app)
+
+
+def test_files_page_serves_spa_index(tmp_path):
+    client = _client_with_middleware(tmp_path)
+    response = client.get("/files?project=demo")
+    assert response.status_code == 200
+    assert '<div id="app">' in response.text
+
+
+def test_file_endpoint_reaches_backend_route(tmp_path):
+    client = _client_with_middleware(tmp_path)
+    response = client.get("/file?path=media/image.png")
+    assert response.status_code == 200
+    assert response.text == "file-endpoint"

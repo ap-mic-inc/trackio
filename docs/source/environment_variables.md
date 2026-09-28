@@ -31,6 +31,10 @@ export TRACKIO_WRITE_TOKEN="YOUR_TOKEN"
 
 The dashboard **write token** for a self-hosted Trackio server (same value as the `write_token` query parameter in the write-access URL). When set on the Trackio server, this value is used as the server's write token instead of generating a random token at startup. When set on the Trackio client, use this when `TRACKIO_SERVER_URL` or `server_url` is a base URL without query parameters. The client sends this token on each request (for example as the `X-Trackio-Write-Token` header) so metric ingestion and uploads are authenticated when not running on Hugging Face Spaces.
 
+### `TRACKIO_OIDC_ISSUER` and related
+
+Enable OpenID Connect sign-in on a self-hosted server. `TRACKIO_OIDC_ISSUER` plus `TRACKIO_OIDC_CLIENT_ID` (and usually `TRACKIO_OIDC_CLIENT_SECRET`) turn on the login flow. Permissions come from `TRACKIO_OIDC_ALLOWED_USERS`, `TRACKIO_OIDC_ALLOWED_GROUPS`, `TRACKIO_OIDC_WRITE_USERS`, and `TRACKIO_OIDC_WRITE_GROUPS`; `TRACKIO_AUTH_REQUIRED=1` puts the whole dashboard behind sign-in. See [OIDC Authentication](oidc_auth.md) for the full list.
+
 ### `TRACKIO_FRONTEND_DIR`
 
 Path to a custom static frontend directory for Trackio. The directory must contain `index.html`.

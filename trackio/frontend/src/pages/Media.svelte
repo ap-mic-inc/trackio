@@ -1,4 +1,6 @@
 <script>
+  import PageHeader from "../components/PageHeader.svelte";
+  import CodeSnippet from "../components/CodeSnippet.svelte";
   import LoadingTrackio from "../components/LoadingTrackio.svelte";
   import Object3DCard from "../components/Object3DCard.svelte";
   import Object3DModal from "../components/Object3DModal.svelte";
@@ -331,7 +333,8 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<div class="media-page">
+<div class="media-page workspace-page">
+  <PageHeader title="Media & Tables" description="Explore images, audio, video, and tables from your selected runs." />
   {#if loading}
     <LoadingTrackio />
   {:else if !hasMedia}
@@ -342,11 +345,15 @@
       {:else if selectedRuns.length === 0}
         <h2>No runs selected</h2>
         <p>Select runs in the sidebar to browse media and tables.</p>
-        <pre><code>{'import trackio\ntrackio.init(project="my-project")\ntrackio.log({"loss": 0.5})\ntrackio.finish()'}</code></pre>
+        <CodeSnippet
+          code={`import trackio\n\ntrackio.init(project="${project || "my-project"}")\ntrackio.log({"loss": 0.5})\ntrackio.finish()`}
+        />
       {:else}
         <h2>No media or tables in this run</h2>
         <p>Log images, video, audio, 3D objects, and tables by passing Trackio objects to <code>trackio.log()</code>:</p>
-        <pre><code>{'import trackio\n\ntrackio.init(project="my-project")\ntrackio.log({"plot": trackio.Image("figure.png")})\ntrackio.log({"clip": trackio.Video("output.mp4")})\ntrackio.log({"audio": trackio.Audio("speech.wav")})\ntrackio.log({"model": trackio.Object3D("scene.glb")})\ntrackio.log({"report": trackio.Html("<h1>Results</h1>")})\n\nimport pandas as pd\ndf = pd.DataFrame({"epoch": [0, 1], "acc": [0.9, 0.95]})\ntrackio.log({"samples": trackio.Table(dataframe=df)})'}</code></pre>
+        <CodeSnippet
+          code={`import trackio\n\ntrackio.init(project="${project || "my-project"}")\ntrackio.log({"plot": trackio.Image("figure.png")})\ntrackio.log({"clip": trackio.Video("output.mp4")})\ntrackio.log({"audio": trackio.Audio("speech.wav")})\ntrackio.log({"model": trackio.Object3D("scene.glb")})\ntrackio.log({"report": trackio.Html("<h1>Results</h1>")})\n\nimport pandas as pd\ndf = pd.DataFrame({"epoch": [0, 1], "acc": [0.9, 0.95]})\ntrackio.log({"samples": trackio.Table(dataframe=df)})`}
+        />
         <p>Each type appears in its own section here once logged.</p>
       {/if}
     </div>
@@ -722,7 +729,9 @@
 
 <style>
   .media-page {
-    padding: 20px 24px;
+    min-width: 0;
+    box-sizing: border-box;
+    padding: 28px;
     overflow-y: auto;
     flex: 1;
   }
@@ -740,6 +749,7 @@
     gap: 12px;
   }
   .image-section-controls {
+    flex-wrap: wrap;
     flex: 1;
     justify-content: flex-end;
   }
@@ -895,7 +905,7 @@
   }
   .gallery {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr));
     gap: 12px;
   }
   .table-object-list {
@@ -955,7 +965,7 @@
     border-radius: var(--radius-sm, 4px);
   }
   .html-gallery {
-    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 360px), 1fr));
   }
   .html-frame {
     width: 100%;
@@ -1137,36 +1147,7 @@
   .load-more-button:hover {
     background: var(--background-fill-secondary, #f9fafb);
   }
-  .empty-state {
-    max-width: 640px;
-    padding: 40px 24px;
-    color: var(--body-text-color, #1f2937);
-  }
-  .empty-state h2 {
-    margin: 0 0 8px;
-    font-size: 20px;
-    font-weight: 700;
-  }
-  .empty-state p {
-    margin: 12px 0 8px;
-    color: var(--body-text-color-subdued, #6b7280);
-  }
-  .empty-state pre {
-    background: var(--background-fill-secondary, #f9fafb);
-    padding: 16px;
-    border-radius: var(--radius-lg, 8px);
-    border: 1px solid var(--border-color-primary, #e5e7eb);
-    font-size: 13px;
-    overflow-x: auto;
-  }
-  .empty-state code {
-    background: var(--background-fill-secondary, #f0f0f0);
-    padding: 1px 5px;
-    border-radius: var(--radius-sm, 4px);
-    font-size: 13px;
-  }
-  .empty-state pre code {
-    background: none;
-    padding: 0;
+  @media (max-width: 700px) {
+    .media-page { padding: 20px 16px; }
   }
 </style>

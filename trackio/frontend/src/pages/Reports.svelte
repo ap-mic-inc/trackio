@@ -1,4 +1,5 @@
 <script>
+  import PageHeader from "../components/PageHeader.svelte";
   import LoadingTrackio from "../components/LoadingTrackio.svelte";
   import { getAlerts, getLogs } from "../lib/api.js";
 
@@ -115,7 +116,8 @@
   );
 </script>
 
-<div class="reports-page">
+<div class="reports-page workspace-page">
+  <PageHeader title="Alerts & Reports" description="Review training alerts and reports from your selected runs." />
   {#if loading}
     <LoadingTrackio />
   {:else if allAlerts.length === 0 && markdownReports.length === 0}
@@ -199,7 +201,9 @@
 
 <style>
   .reports-page {
-    padding: 20px 24px;
+    min-width: 0;
+    box-sizing: border-box;
+    padding: 28px;
     overflow-y: auto;
     flex: 1;
   }
@@ -214,6 +218,7 @@
     min-width: 200px;
   }
   .filter-pills {
+    flex-wrap: wrap;
     display: flex;
     gap: 4px;
   }
@@ -228,44 +233,12 @@
     transition: background-color 0.15s, color 0.15s;
   }
   .pill:hover {
-    background: var(--neutral-100, #f3f4f6);
+    background: var(--background-fill-secondary, #f3f4f6);
   }
   .pill.active {
     background: var(--color-accent, #f97316);
     color: white;
     border-color: var(--color-accent, #f97316);
-  }
-  .empty-state {
-    max-width: 640px;
-    padding: 40px 24px;
-    color: var(--body-text-color, #1f2937);
-  }
-  .empty-state h2 {
-    margin: 0 0 8px;
-    font-size: 20px;
-    font-weight: 700;
-  }
-  .empty-state p {
-    margin: 12px 0 8px;
-    color: var(--body-text-color-subdued, #6b7280);
-  }
-  .empty-state pre {
-    background: var(--background-fill-secondary, #f9fafb);
-    padding: 16px;
-    border-radius: var(--radius-lg, 8px);
-    border: 1px solid var(--border-color-primary, #e5e7eb);
-    font-size: 13px;
-    overflow-x: auto;
-  }
-  .empty-state code {
-    background: var(--background-fill-secondary, #f0f0f0);
-    padding: 1px 5px;
-    border-radius: var(--radius-sm, 4px);
-    font-size: 13px;
-  }
-  .empty-state pre code {
-    background: none;
-    padding: 0;
   }
   .alerts-table {
     width: 100%;
@@ -359,5 +332,8 @@
   .filter-empty {
     color: var(--body-text-color-subdued, #6b7280);
     font-size: var(--text-md, 14px);
+  }
+  @media (max-width: 700px) {
+    .reports-page { padding: 20px 16px; }
   }
 </style>

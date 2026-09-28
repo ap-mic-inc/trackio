@@ -19,6 +19,8 @@ export function getPageFromPath() {
     case "":
     case "metrics":
       return "metrics";
+    case "overview":
+      return "overview";
     case "system":
       return "system";
     case "traces":
@@ -37,6 +39,8 @@ export function getPageFromPath() {
       return "artifacts";
     case "settings":
       return "settings";
+    case "admin":
+      return "admin";
     default:
       return "metrics";
   }
@@ -46,6 +50,7 @@ export function navigateTo(page) {
   const params = new URLSearchParams(window.location.search);
   const pathMap = {
     metrics: "/",
+    overview: "/overview",
     traces: "/traces",
     system: "/system",
     media: "/media",
@@ -55,6 +60,7 @@ export function navigateTo(page) {
     files: "/files",
     artifacts: "/artifacts",
     settings: "/settings",
+    admin: "/admin",
   };
   const path = trackioBase() + (pathMap[page] || "/");
   const search = params.toString();

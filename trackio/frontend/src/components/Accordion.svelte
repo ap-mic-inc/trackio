@@ -26,42 +26,39 @@
 
 <style>
   .accordion {
-    margin-bottom: 12px;
-    border: 1px solid var(--border-color-primary, #e5e7eb);
-    border-radius: var(--radius-lg, 8px);
-    background: var(--background-fill-primary, white);
-    overflow: hidden;
+    margin-bottom: 28px;
   }
   .accordion-hidden {
-    margin-bottom: 8px;
+    margin-bottom: 16px;
   }
   .accordion-header {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 7px;
     width: 100%;
-    padding: 10px 14px;
+    padding: 0 0 10px;
     border: none;
-    background: var(--background-fill-primary, white);
+    background: none;
     color: var(--body-text-color, #1f2937);
     font-size: var(--text-md, 14px);
     font-weight: 600;
+    letter-spacing: -0.01em;
     cursor: pointer;
     text-align: left;
   }
-  .accordion-header:hover {
-    background: var(--background-fill-secondary, #f9fafb);
+  .accordion-header:hover .arrow {
+    color: var(--body-text-color, #1f2937);
   }
   .arrow {
-    font-size: 14px;
-    transition: transform 0.15s;
-    color: var(--body-text-color, #1f2937);
+    font-size: 12px;
+    transition: transform 0.15s, color 0.15s;
+    color: var(--body-text-color-subdued, #9ca3af);
     display: inline-block;
   }
   .arrow:not(.rotated) {
     transform: rotate(-90deg);
   }
   .accordion-body {
-    padding: 0 14px 14px;
+    padding: 0;
   }
 </style>

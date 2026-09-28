@@ -4,16 +4,17 @@
     tabAvailability = {},
     optionalEmptyTabs = new Set(),
     hideEmptyTabs = false,
+    showAdmin = false,
     onNavigate,
   } = $props();
 
   const ALL_LINKS = [
+    { id: "overview", label: "Overview" },
     { id: "metrics", label: "Metrics" },
     { id: "system", label: "System Metrics" },
     { id: "traces", label: "Traces" },
     { id: "media", label: "Media & Tables" },
     { id: "reports", label: "Alerts & Reports" },
-    { id: "runs", label: "Runs" },
     { id: "files", label: "Files" },
     { id: "artifacts", label: "Artifacts" },
   ];
@@ -64,13 +65,14 @@
   });
 </script>
 
-<nav class="navbar">
+<nav class="navbar" aria-label="Workspace navigation">
   <div class="nav-spacer"></div>
   <div class="nav-tabs" bind:this={tabsEl}>
     {#each links as link}
       <button
         class="nav-link"
         class:active={isActive(link.id)}
+        aria-current={isActive(link.id) ? "page" : undefined}
         class:empty={isOptionalEmpty(link.id)}
         onclick={() => handleClick(link.id)}
         title={isOptionalEmpty(link.id) ? `${link.label} is empty for this project` : link.label}
@@ -78,9 +80,27 @@
         {link.label}
       </button>
     {/each}
+    {#if showAdmin}
+      <button
+        class="nav-link settings-btn"
+        class:active={currentPage === "admin"}
+        aria-current={currentPage === "admin" ? "page" : undefined}
+        onclick={() => handleClick("admin")}
+        title="Users & Access"
+      >
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+          <circle cx="9" cy="7" r="4"/>
+          <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+          <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+        </svg>
+        <span>Admin</span>
+      </button>
+    {/if}
     <button
       class="nav-link settings-btn"
       class:active={currentPage === "settings"}
+      aria-current={currentPage === "settings" ? "page" : undefined}
       onclick={() => handleClick("settings")}
       title="CLI & Settings"
     >
@@ -122,29 +142,31 @@
   }
   .nav-link {
     flex-shrink: 0;
-    padding: 10px 16px;
+    padding: 12px 13px;
     border: none;
     background: none;
     color: var(--body-text-color-subdued, #6b7280);
-    font-size: var(--text-md, 14px);
+    font-size: 13.5px;
     cursor: pointer;
     white-space: nowrap;
     border-bottom: 2px solid transparent;
-    transition: color 0.15s;
-    font-weight: 400;
+    transition: color 0.15s, border-color 0.15s;
+    font-weight: 500;
+    letter-spacing: -0.01em;
   }
   .nav-link.empty:not(.active) {
     color: var(--body-text-color-subdued, #9ca3af);
-    opacity: 0.48;
+    opacity: 0.6;
   }
+  .nav-link:focus-visible { outline: 2px solid var(--color-accent, #f97316); outline-offset: -4px; }
   .nav-link:hover {
     color: var(--body-text-color, #1f2937);
     opacity: 1;
   }
   .nav-link.active {
     color: var(--body-text-color, #1f2937);
-    border-bottom-color: var(--body-text-color, #1f2937);
-    font-weight: 500;
+    border-bottom-color: var(--color-accent, #f97316);
+    font-weight: 600;
   }
   .settings-btn {
     display: flex;

@@ -70,7 +70,7 @@
     flex-direction: column;
     position: relative;
     border-right: 1px solid var(--border-color-primary, #e5e7eb);
-    background: var(--background-fill-primary, #fff);
+    background: var(--sidebar-background-fill, #f3f4f6);
     overflow: hidden;
     transition:
       width 0.2s,
@@ -100,7 +100,11 @@
   }
   .toggle-btn:hover {
     color: var(--body-text-color, #1f2937);
-    background-color: var(--background-fill-secondary, #f9fafb);
+    background-color: color-mix(
+      in srgb,
+      var(--border-color-primary, #e5e7eb) 45%,
+      transparent
+    );
   }
   .shell-header {
     padding: 16px 16px 10px;

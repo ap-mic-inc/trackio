@@ -4,6 +4,7 @@
   import Sidebar from "./components/Sidebar.svelte";
   import AlertPanel from "./components/AlertPanel.svelte";
   import Metrics from "./pages/Metrics.svelte";
+  import Overview from "./pages/Overview.svelte";
   import Traces from "./pages/Traces.svelte";
   import SystemMetrics from "./pages/SystemMetrics.svelte";
   import Media from "./pages/Media.svelte";
@@ -50,8 +51,13 @@
     clearArtifactSelectionParams,
   } from "./lib/router.js";
   import Settings from "./pages/Settings.svelte";
+  import Admin from "./pages/Admin.svelte";
   import { initTheme, isDark, onThemeChange } from "./lib/theme.js";
   import { applyUrlTokens } from "./lib/urlTokens.js";
+  import {
+    registerSnapshotProvider,
+    startViewStateBridge,
+  } from "./lib/viewState.js";
 
   function metricFilterFromLegacyMetricsParam(metricsParam) {
     if (!metricsParam) return "";
@@ -102,6 +108,7 @@
   let sidebarUserControlled = $state(false);
   let navbarHidden = $state(false);
   let hideEmptyTabs = $state(false);
+  let narrowViewport = $state(false);
   let urlTick = $state(0);
   let alerts = $state([]);
   let pollTimer = $state(null);
@@ -109,6 +116,10 @@
     spaces: false,
     allowed: true,
     auth: "local",
+    oidcEnabled: false,
+    loginEnabled: false,
+    user: null,
+    admin: false,
   });
   let mutationPollTimer = $state(null);
   let appBootstrapReady = $state(false);
@@ -140,7 +151,6 @@
     "traces",
     "media",
     "reports",
-    "runs",
     "files",
     "artifacts",
   ];
@@ -174,10 +184,29 @@
     runs.filter((run) => selectedRuns.includes(runKey(run))),
   );
 
+  $effect(() => {
+    if (currentPage !== "run-detail" || !runs.length) return;
+    urlTick;
+    const selectedId = getQueryParam("selected_run_id");
+    const selectedName = getQueryParam("selected_run");
+    const detailRun = runs.find((run) =>
+      selectedId
+        ? String(runKey(run)) === selectedId
+        : run.name === selectedName,
+    );
+    if (detailRun) selectedRuns = [runKey(detailRun)];
+  });
+
   function handleNavigate(page) {
     openedFirstNonEmptyTab = true;
     currentPage = page;
     navigateTo(page);
+  }
+
+  function openOverviewRunInMetrics(run) {
+    selectedRuns = [runKey(run)];
+    currentPage = "metrics";
+    navigateTo("metrics");
   }
 
   function isBareDashboardPath() {
@@ -346,9 +375,21 @@
         spaces: !!s.spaces,
         allowed: !!s.allowed,
         auth: s.auth ?? "none",
+        oidcEnabled: !!s.oidc_enabled,
+        loginEnabled: !!s.login_enabled,
+        user: s.user ?? null,
+        admin: !!s.admin,
       };
     } catch {
-      mutationStatus = { spaces: false, allowed: true, auth: "local" };
+      mutationStatus = {
+        spaces: false,
+        allowed: true,
+        auth: "local",
+        oidcEnabled: false,
+        loginEnabled: false,
+        user: null,
+        admin: false,
+      };
     }
   }
 
@@ -396,6 +437,7 @@
     sidebarUserControlled = !sidebarState.responsive;
 
     const stopNarrowViewportWatch = watchNarrowViewport((narrow) => {
+      narrowViewport = narrow;
       if (sidebarUserControlled) return;
       sidebarOpen = !narrow;
     });
@@ -435,12 +477,29 @@
     currentPage = getPageFromPath();
 
     window.addEventListener("popstate", () => {
+      openedFirstNonEmptyTab = true;
       currentPage = getPageFromPath();
       urlTick++;
       applyLockedProject();
     });
 
     applyUrlTokens();
+
+    const unregisterAppSnapshot = registerSnapshotProvider("app", () => ({
+      page: currentPage,
+      project: selectedProject,
+      space_id: spaceId,
+      runs: selectedRunRecords.map((run) => ({
+        name: run.name,
+        id: run.id ?? null,
+      })),
+      x_axis: xAxis,
+      smoothing,
+      log_x: logScaleX,
+      log_y: logScaleY,
+      metric_filter: metricFilter,
+    }));
+    const stopViewStateBridge = startViewStateBridge();
 
     (async () => {
       const staticMode = await isStaticMode();
@@ -490,6 +549,8 @@
       if (mutationPollTimer) clearInterval(mutationPollTimer);
       window.removeEventListener("focus", refreshMutationAccess);
       stopNarrowViewportWatch();
+      stopViewStateBridge();
+      unregisterAppSnapshot();
     };
   });
 
@@ -519,6 +580,15 @@
     } else if (metricColumns.length > 0) {
       xAxis = "step";
       urlXAxisApplied = true;
+    }
+  });
+
+  $effect(() => {
+    if (!urlXAxisApplied) return;
+    if (xAxis === "step" || xAxis === "time") return;
+    if (metricColumns.length === 0) return;
+    if (!metricColumns.includes(xAxis)) {
+      xAxis = "step";
     }
   });
 
@@ -555,6 +625,7 @@
   });
 
   let showSidebar = $derived(
+    currentPage === "overview" ||
     currentPage === "metrics" ||
       currentPage === "traces" ||
       currentPage === "system" ||
@@ -566,7 +637,9 @@
   );
 
   let sidebarVariant = $derived(
-    currentPage === "runs" || currentPage === "files" ? "compact" : "full"
+    currentPage === "runs" || currentPage === "files" || currentPage === "overview"
+      ? "compact"
+      : "full"
   );
 
   function markSidebarUserControlled() {
@@ -584,6 +657,9 @@
       spacesMode={mutationStatus.spaces}
       runMutationAllowed={mutationStatus.allowed}
       mutationAuth={mutationStatus.auth}
+      oidcEnabled={mutationStatus.oidcEnabled}
+      loginEnabled={mutationStatus.loginEnabled}
+      authUser={mutationStatus.user}
       {readOnlySource}
       {projects}
       projectLocked={projectLocked}
@@ -630,13 +706,21 @@
         {currentPage}
         {tabAvailability}
         optionalEmptyTabs={OPTIONAL_EMPTY_TABS}
-        {hideEmptyTabs}
+        hideEmptyTabs={hideEmptyTabs || narrowViewport}
+        showAdmin={mutationStatus.admin && !mutationStatus.spaces}
         onNavigate={handleNavigate}
       />
     {/if}
 
     <div class="page-content">
-      {#if currentPage === "metrics"}
+      {#if currentPage === "overview"}
+        <Overview
+          project={selectedProject}
+          {runs}
+          {runConfigs}
+          onRunSelect={openOverviewRunInMetrics}
+        />
+      {:else if currentPage === "metrics"}
         <Metrics
           project={selectedProject}
           selectedRuns={selectedRunRecords}
@@ -701,6 +785,8 @@
         />
       {:else if currentPage === "settings"}
         <Settings {spaceId} selectedProject={selectedProject} {projects} />
+      {:else if currentPage === "admin"}
+        <Admin isAdmin={mutationStatus.admin} />
       {/if}
     </div>
   </div>
@@ -716,6 +802,8 @@
   }
 
   :global(body) {
+    height: 100%;
+    overflow: hidden;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
       "Helvetica Neue", Arial, sans-serif;
     background: var(--background-fill-primary, #fff);
@@ -724,9 +812,18 @@
     -webkit-font-smoothing: antialiased;
   }
 
+  :global(html),
+  :global(#app) {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+  }
+
   .app {
     display: flex;
     height: 100vh;
+    height: 100dvh;
+    min-height: 0;
     overflow: hidden;
   }
 

@@ -1,6 +1,8 @@
 <script>
+  import PageHeader from "../components/PageHeader.svelte";
+  import CodeSnippet from "../components/CodeSnippet.svelte";
   import { onMount } from "svelte";
-  import { getQueryParam } from "../lib/router.js";
+  import { getQueryParam, navigateTo } from "../lib/router.js";
   import LinePlot from "../components/LinePlot.svelte";
   import BarPlot from "../components/BarPlot.svelte";
   import HistogramPlot from "../components/HistogramPlot.svelte";
@@ -9,12 +11,14 @@
   import RunComparer from "../components/RunComparer.svelte";
   import { getLogsBatch } from "../lib/api.js";
   import {
+    createPollingTask,
     getMetricsPollIntervalMs,
     isRateLimitCooldownActive,
     isTabHidden,
   } from "../lib/hostPolling.js";
   import {
     processRunData,
+    resolveXColumn,
     getMetricColumns,
     groupMetricsByPrefix,
     filterMetricsByRegex,
@@ -22,6 +26,7 @@
     logsHaveNewData,
   } from "../lib/dataProcessing.js";
   import { buildColorMap } from "../lib/stores.js";
+  import { registerSnapshotProvider } from "../lib/viewState.js";
   import {
     AUTO_PANELS_PER_ROW,
     getPlotColumns,
@@ -58,9 +63,11 @@
   let hasLoaded = $state(false);
   let metricOrder = $state({});
   let dragState = $state({ group: null, index: -1 });
+  let pageElement = $state(null);
 
   let rawDataCache = new Map();
   let refreshTimer = null;
+  const refreshTask = createPollingTask();
   const MAX_BATCH_RUNS = 64;
 
   let colorMap = $derived(buildColorMap(allRuns));
@@ -79,6 +86,46 @@
       ? filterMetricsByRegex(histogramMetrics, metricFilter)
       : histogramMetrics,
   );
+
+  let selectedGroup = $state("all");
+
+  function groupMetricCount(name) {
+    const g = metricGroups[name];
+    if (!g) return 0;
+    return (
+      g.direct.length +
+      Object.values(g.subgroups).reduce((n, arr) => n + arr.length, 0)
+    );
+  }
+
+  let visibleGroupNames = $derived(
+    selectedGroup === "all"
+      ? groupNames
+      : groupNames.filter((g) => g === selectedGroup),
+  );
+
+  let showHistogramSection = $derived(
+    filteredHistogramMetrics.length > 0 &&
+      (selectedGroup === "all" || selectedGroup === "histograms"),
+  );
+
+  let totalMetricCount = $derived(
+    groupNames.reduce((n, g) => n + groupMetricCount(g), 0) +
+      filteredHistogramMetrics.length,
+  );
+
+  let showGroupChips = $derived(
+    groupNames.length + (filteredHistogramMetrics.length > 0 ? 1 : 0) > 1,
+  );
+
+  $effect(() => {
+    if (selectedGroup === "all") return;
+    const stillExists =
+      selectedGroup === "histograms"
+        ? filteredHistogramMetrics.length > 0
+        : groupNames.includes(selectedGroup);
+    if (!stillExists) selectedGroup = "all";
+  });
 
   function getPlotResult(metric) {
     return computeMetricPlotData(masterData, xColumn, metric, xLim);
@@ -172,15 +219,17 @@
     }
 
     const allRows = [];
+    const runXColumns = [];
     for (const run of selectedRuns) {
       const logs = rawDataCache.get(run.id ?? run.name);
       if (!logs) continue;
       const result = processRunData(logs, run, smoothing, xAxis, logScaleX, logScaleY);
       if (result) {
         allRows.push(...result.rows);
-        xColumn = result.xColumn;
+        runXColumns.push(result.xColumn);
       }
     }
+    xColumn = resolveXColumn(runXColumns, xAxis);
     masterData = allRows;
 
     const originals = allRows.filter(
@@ -212,17 +261,26 @@
     singlePointMetrics = sp;
   }
 
-  async function fetchLogsForRuns(runs) {
+  async function fetchLogsForRuns(
+    runs,
+    requestOptions = {},
+    projectName = project,
+  ) {
     const results = [];
     for (let i = 0; i < runs.length; i += MAX_BATCH_RUNS) {
       const chunk = runs.slice(i, i + MAX_BATCH_RUNS);
-      const batch = await getLogsBatch(project, chunk, { scalar_only: true });
+      const batch = await getLogsBatch(
+        projectName,
+        chunk,
+        { scalar_only: true },
+        requestOptions,
+      );
       results.push(...batch);
     }
     return results;
   }
 
-  async function fetchNewRuns() {
+  async function fetchNewRuns(signal) {
     if (!appBootstrapReady) {
       hasLoaded = false;
       return;
@@ -236,20 +294,28 @@
       return;
     }
 
-    const needFetch = selectedRuns.filter((run) => {
+    const requestedProject = project;
+    const requestedRuns = selectedRuns;
+    const needFetch = requestedRuns.filter((run) => {
       const runKey = run.id ?? run.name;
       return !rawDataCache.has(runKey);
     });
     let fetched = false;
     if (needFetch.length > 0) {
       try {
-        const batch = await fetchLogsForRuns(needFetch);
+        const batch = await fetchLogsForRuns(
+          needFetch,
+          { signal },
+          requestedProject,
+        );
+        if (signal.aborted || requestedProject !== project) return;
         for (const entry of batch) {
           const runKey = entry.run_id ?? entry.run;
           rawDataCache.set(runKey, entry.logs);
           fetched = true;
         }
       } catch (e) {
+        if (e?.name === "AbortError") return;
         console.error("Failed to load metric logs:", e);
       }
     }
@@ -265,24 +331,35 @@
     if (!project || selectedRuns.length === 0) return;
     if (isTabHidden()) return;
     if (isRateLimitCooldownActive()) return;
-
     try {
-      const batch = await fetchLogsForRuns(selectedRuns);
-      let changed = false;
-      for (const entry of batch) {
-        const runKey = entry.run_id ?? entry.run;
-        const logs = entry.logs;
-        const prev = rawDataCache.get(runKey);
-        if (!prev || logsHaveNewData(prev, logs)) {
-          rawDataCache.set(runKey, logs);
-          changed = true;
+      await refreshTask.run(async (signal) => {
+        const requestedProject = project;
+        const requestedRuns = selectedRuns;
+        const batch = await fetchLogsForRuns(
+          requestedRuns,
+          { signal },
+          requestedProject,
+        );
+        if (signal.aborted || requestedProject !== project) return;
+        let changed = false;
+        for (const entry of batch) {
+          const runKey = entry.run_id ?? entry.run;
+          const logs = entry.logs;
+          const prev = rawDataCache.get(runKey);
+          if (!prev || logsHaveNewData(prev, logs)) {
+            rawDataCache.set(runKey, logs);
+            changed = true;
+          }
         }
-      }
-      if (changed) {
-        processFromCache();
-      }
+        if (changed) {
+          processFromCache();
+        }
+        hasLoaded = true;
+      });
     } catch (e) {
-      console.error("Failed to refresh metric logs:", e);
+      if (e?.name !== "AbortError") {
+        console.error("Failed to refresh metric logs:", e);
+      }
     }
   }
 
@@ -290,8 +367,9 @@
     project;
     selectedRuns;
     appBootstrapReady;
+    refreshTask.cancel();
     rawDataCache = project ? rawDataCache : new Map();
-    fetchNewRuns();
+    void refreshTask.run(fetchNewRuns, null);
   });
 
   $effect(() => {
@@ -302,6 +380,16 @@
     if (hasLoaded) {
       processFromCache();
     }
+  });
+
+  let lastXSemantics = null;
+
+  $effect(() => {
+    const semantics = `${project}\0${xAxis}\0${logScaleX}`;
+    if (lastXSemantics !== null && semantics !== lastXSemantics) {
+      xLim = null;
+    }
+    lastXSemantics = semantics;
   });
 
   onMount(() => {
@@ -320,8 +408,75 @@
     );
     return () => {
       if (refreshTimer) clearInterval(refreshTimer);
+      refreshTask.cancel();
     };
   });
+
+  function visibleMetricNames() {
+    const names = [];
+    for (const groupName of groupNames) {
+      const group = metricGroups[groupName];
+      names.push(...getOrderedMetrics(`${groupName}:direct`, group.direct));
+      for (const [subName, subMetrics] of Object.entries(group.subgroups)) {
+        names.push(...getOrderedMetrics(`${groupName}:${subName}`, subMetrics));
+      }
+    }
+    return names;
+  }
+
+  function visibleClipRect(el) {
+    let clip = { top: 0, left: 0, bottom: window.innerHeight, right: window.innerWidth };
+    for (let node = el; node; node = node.parentElement) {
+      const style = getComputedStyle(node);
+      if (style.overflowY === "visible" && style.overflowX === "visible") continue;
+      const rect = node.getBoundingClientRect();
+      clip = {
+        top: Math.max(clip.top, rect.top),
+        left: Math.max(clip.left, rect.left),
+        bottom: Math.min(clip.bottom, rect.bottom),
+        right: Math.min(clip.right, rect.right),
+      };
+    }
+    return clip;
+  }
+
+  function metricsOnScreen() {
+    if (!pageElement) return [];
+    const clip = visibleClipRect(pageElement);
+    const names = [];
+    for (const el of pageElement.querySelectorAll(".plot-container[data-metric]")) {
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) continue;
+      const visibleHeight = Math.min(rect.bottom, clip.bottom) - Math.max(rect.top, clip.top);
+      const visibleWidth = Math.min(rect.right, clip.right) - Math.max(rect.left, clip.left);
+      if (visibleHeight >= rect.height / 2 && visibleWidth >= rect.width / 2) {
+        names.push(el.dataset.metric);
+      }
+    }
+    return [...new Set(names)];
+  }
+
+  function latestX() {
+    let latest = null;
+    for (const row of masterData) {
+      if (row.data_type && row.data_type !== "original") continue;
+      const value = row[xColumn];
+      if (typeof value === "number" && (latest === null || value > latest)) {
+        latest = value;
+      }
+    }
+    return latest;
+  }
+
+  onMount(() =>
+    registerSnapshotProvider("metrics", () => ({
+      x_axis: xColumn,
+      x_range: xLim ? [xLim[0], xLim[1]] : null,
+      metrics: visibleMetricNames(),
+      metrics_on_screen: metricsOnScreen(),
+      latest_x: latestX(),
+    })),
+  );
 
   function handlePlotSelect(range) {
     if (range && range.length === 2) {
@@ -335,15 +490,19 @@
 
 </script>
 
-<div class="metrics-page">
+<div class="metrics-page workspace-page" bind:this={pageElement}>
+  <PageHeader title="Metrics" description="Compare training progress across your selected runs." />
   {#if !appBootstrapReady || !hasLoaded}
     <LoadingTrackio />
   {:else if !project}
     <div class="empty-state">
       <h2>No projects</h2>
       <p>
-        Create a project by calling <code>trackio.init(project="…")</code> in your training script.
+        Create a project by calling <code>trackio.init(project="…")</code> in your training script:
       </p>
+      <CodeSnippet
+        code={'import trackio\n\ntrackio.init(project="my-project")\nfor i in range(10):\n    trackio.log({"loss": 1 / (i + 1)})\ntrackio.finish()'}
+      />
     </div>
   {:else if selectedRuns.length === 0}
     <div class="empty-state">
@@ -353,18 +512,53 @@
   {:else if masterData.length === 0}
     <div class="empty-state">
       <h2>Start logging with Trackio</h2>
-      <p>You can create a new project by calling <code>trackio.init()</code>:</p>
-      <pre><code>{'import trackio\ntrackio.init(project="my-project")'}</code></pre>
-      <p>Then call <code>trackio.log()</code> to log metrics:</p>
-      <pre><code>{'for i in range(10):\n    trackio.log({"loss": 1/(i+1)})'}</code></pre>
-      <p>Finally, call <code>trackio.finish()</code> to finish the run:</p>
-      <pre><code>{'trackio.finish()'}</code></pre>
+      <p>
+        Call <code>trackio.init()</code> to create a run, <code>trackio.log()</code> to log metrics,
+        and <code>trackio.finish()</code> when the run is done:
+      </p>
+      <CodeSnippet
+        code={`import trackio\n\ntrackio.init(project="${project}")\nfor i in range(10):\n    trackio.log({"loss": 1 / (i + 1)})\ntrackio.finish()`}
+      />
+      <p>
+        Training an LLM? Stage-specific recipes (pretraining, SFT, RLHF,
+        evals) with suggested metrics live in
+        <button class="inline-link" onclick={() => navigateTo("settings")}>Settings</button>.
+      </p>
     </div>
   {:else}
     {#if showComparer}
       <RunComparer runs={selectedRuns} {runConfigs} {colorMap} />
     {/if}
-    {#each groupNames as groupName}
+    {#if showGroupChips}
+      <div class="group-chips" aria-label="Metric groups">
+        <button
+          class="group-chip"
+          class:active={selectedGroup === "all"}
+          onclick={() => (selectedGroup = "all")}
+        >
+          all <span class="chip-count">{totalMetricCount}</span>
+        </button>
+        {#each groupNames as g}
+          <button
+            class="group-chip"
+            class:active={selectedGroup === g}
+            onclick={() => (selectedGroup = g)}
+          >
+            {g} <span class="chip-count">{groupMetricCount(g)}</span>
+          </button>
+        {/each}
+        {#if filteredHistogramMetrics.length > 0}
+          <button
+            class="group-chip"
+            class:active={selectedGroup === "histograms"}
+            onclick={() => (selectedGroup = "histograms")}
+          >
+            histograms <span class="chip-count">{filteredHistogramMetrics.length}</span>
+          </button>
+        {/if}
+      </div>
+    {/if}
+    {#each visibleGroupNames as groupName}
       {@const group = metricGroups[groupName]}
       {@const directKey = `${groupName}:direct`}
       {@const orderedDirect = getOrderedMetrics(directKey, group.direct)}
@@ -483,7 +677,7 @@
       </Accordion>
     {/each}
 
-    {#if filteredHistogramMetrics.length > 0}
+    {#if showHistogramSection}
       <Accordion
         label="histograms ({filteredHistogramMetrics.length})"
         open={true}
@@ -510,15 +704,17 @@
 
 <style>
   .metrics-page {
-    padding: 20px 24px;
+    min-width: 0;
+    box-sizing: border-box;
+    padding: 28px;
     overflow-y: auto;
     flex: 1;
     min-height: 0;
   }
   .plot-grid {
-    --plot-gap: 16px;
-    --plot-min-width: 300px;
-    --plot-max-cols: 4;
+    --plot-gap: 14px;
+    --plot-min-width: 280px;
+    --plot-max-cols: 5;
     display: grid;
     grid-template-columns: repeat(var(--cols, 1), minmax(0, 1fr));
     gap: var(--plot-gap);
@@ -546,36 +742,56 @@
   .subgroup-list {
     margin-top: 16px;
   }
-  .empty-state {
-    max-width: 640px;
-    padding: 40px 24px;
+  .inline-link {
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--color-accent, #f97316);
+    font: inherit;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .inline-link:hover {
+    text-decoration: underline;
+  }
+  .group-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 0 0 14px;
+    padding: 8px 0;
+    background: transparent;
+    box-shadow: none;
+  }
+  .group-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    border: 1px solid var(--border-color-primary, #e5e7eb);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--body-text-color-subdued, #6b7280);
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s, background-color 0.15s;
+  }
+  .group-chip:hover {
     color: var(--body-text-color, #1f2937);
   }
-  .empty-state h2 {
-    margin: 0 0 8px;
-    font-size: 20px;
-    font-weight: 700;
+  .group-chip.active {
+    border-color: var(--color-accent, #f97316);
+    background: var(--color-accent-soft, #fff7ed);
+    color: var(--body-text-color, #1f2937);
   }
-  .empty-state p {
-    margin: 12px 0 8px;
-    color: var(--body-text-color-subdued, #6b7280);
+  .chip-count {
+    font-size: 11px;
+    color: var(--body-text-color-subdued, #9ca3af);
+    font-variant-numeric: tabular-nums;
   }
-  .empty-state pre {
-    background: var(--background-fill-secondary, #f9fafb);
-    padding: 16px;
-    border-radius: var(--radius-lg, 8px);
-    border: 1px solid var(--border-color-primary, #e5e7eb);
-    font-size: 13px;
-    overflow-x: auto;
-  }
-  .empty-state code {
-    background: var(--background-fill-secondary, #f0f0f0);
-    padding: 1px 5px;
-    border-radius: var(--radius-sm, 4px);
-    font-size: 13px;
-  }
-  .empty-state pre code {
-    background: none;
-    padding: 0;
+  @media (max-width: 700px) {
+    .metrics-page { padding: 20px 16px; }
   }
 </style>

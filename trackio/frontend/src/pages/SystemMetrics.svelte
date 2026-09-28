@@ -1,10 +1,13 @@
 <script>
+  import PageHeader from "../components/PageHeader.svelte";
+  import CodeSnippet from "../components/CodeSnippet.svelte";
   import { onMount } from "svelte";
   import LinePlot from "../components/LinePlot.svelte";
   import Accordion from "../components/Accordion.svelte";
   import LoadingTrackio from "../components/LoadingTrackio.svelte";
   import { getSystemLogs, getSystemLogsBatch } from "../lib/api.js";
   import {
+    createPollingTask,
     getMetricsPollIntervalMs,
     isRateLimitCooldownActive,
     isTabHidden,
@@ -40,6 +43,7 @@
 
   let rawDataCache = new Map();
   let refreshTimer = null;
+  const refreshTask = createPollingTask();
 
   let runColorMap = $derived(buildColorMap(allRuns.length ? allRuns : selectedRuns));
 
@@ -187,10 +191,14 @@
     return /\b(404|405|501)\b/.test(msg);
   }
 
-  async function fetchSystemLogsForRuns(runs) {
+  async function fetchSystemLogsForRuns(
+    runs,
+    requestOptions = {},
+    projectName = project,
+  ) {
     if (batchEndpointAvailable && runs.length <= MAX_BATCH_RUNS) {
       try {
-        return await getSystemLogsBatch(project, runs);
+        return await getSystemLogsBatch(projectName, runs, requestOptions);
       } catch (e) {
         if (!isMissingEndpointError(e)) throw e;
         batchEndpointAvailable = false;
@@ -200,14 +208,18 @@
       const results = [];
       for (let i = 0; i < runs.length; i += MAX_BATCH_RUNS) {
         const chunk = runs.slice(i, i + MAX_BATCH_RUNS);
-        const batch = await getSystemLogsBatch(project, chunk);
+        const batch = await getSystemLogsBatch(
+          projectName,
+          chunk,
+          requestOptions,
+        );
         results.push(...batch);
       }
       return results;
     }
     const results = [];
     for (const run of runs) {
-      const logs = await getSystemLogs(project, run);
+      const logs = await getSystemLogs(projectName, run, requestOptions);
       results.push({
         run: run?.name ?? null,
         run_id: run?.id ?? null,
@@ -217,7 +229,7 @@
     return results;
   }
 
-  async function fetchNewRuns() {
+  async function fetchNewRuns(signal) {
     if (!appBootstrapReady) {
       hasLoaded = false;
       return;
@@ -230,14 +242,21 @@
       return;
     }
 
-    const needFetch = selectedRuns.filter((run) => {
+    const requestedProject = project;
+    const requestedRuns = selectedRuns;
+    const needFetch = requestedRuns.filter((run) => {
       const runKey = run.id ?? run.name;
       return !rawDataCache.has(runKey);
     });
     let fetched = false;
     if (needFetch.length > 0) {
       try {
-        const batch = await fetchSystemLogsForRuns(needFetch);
+        const batch = await fetchSystemLogsForRuns(
+          needFetch,
+          { signal },
+          requestedProject,
+        );
+        if (signal.aborted || requestedProject !== project) return;
         for (const entry of batch) {
           const runKey = entry.run_id ?? entry.run;
           rawDataCache.set(runKey, entry.logs);
@@ -245,6 +264,7 @@
         }
         loadError = null;
       } catch (e) {
+        if (e?.name === "AbortError") return;
         console.error("Failed to load system metric logs:", e);
         if (!hasLoaded) {
           loadError = e && e.message ? e.message : "Failed to load system metrics";
@@ -265,24 +285,36 @@
     if (!project || selectedRuns.length === 0) return;
     if (isTabHidden()) return;
     if (isRateLimitCooldownActive()) return;
-
     try {
-      const batch = await fetchSystemLogsForRuns(selectedRuns);
-      let changed = false;
-      for (const entry of batch) {
-        const runKey = entry.run_id ?? entry.run;
-        const logs = entry.logs;
-        const prev = rawDataCache.get(runKey);
-        if (!prev || logsHaveNewData(prev, logs)) {
-          rawDataCache.set(runKey, logs);
-          changed = true;
+      await refreshTask.run(async (signal) => {
+        const requestedProject = project;
+        const requestedRuns = selectedRuns;
+        const batch = await fetchSystemLogsForRuns(
+          requestedRuns,
+          { signal },
+          requestedProject,
+        );
+        if (signal.aborted || requestedProject !== project) return;
+        let changed = false;
+        for (const entry of batch) {
+          const runKey = entry.run_id ?? entry.run;
+          const logs = entry.logs;
+          const prev = rawDataCache.get(runKey);
+          if (!prev || logsHaveNewData(prev, logs)) {
+            rawDataCache.set(runKey, logs);
+            changed = true;
+          }
         }
-      }
-      if (changed) {
-        processFromCache();
-      }
+        if (changed) {
+          processFromCache();
+        }
+        loadError = null;
+        hasLoaded = true;
+      });
     } catch (e) {
-      console.error("Failed to refresh system metric logs:", e);
+      if (e?.name !== "AbortError") {
+        console.error("Failed to refresh system metric logs:", e);
+      }
     }
   }
 
@@ -290,8 +322,9 @@
     project;
     selectedRuns;
     appBootstrapReady;
+    refreshTask.cancel();
     rawDataCache = project ? rawDataCache : new Map();
-    fetchNewRuns();
+    void refreshTask.run(fetchNewRuns, null);
   });
 
   $effect(() => {
@@ -339,6 +372,7 @@
     );
     return () => {
       if (refreshTimer) clearInterval(refreshTimer);
+      refreshTask.cancel();
     };
   });
 
@@ -485,7 +519,8 @@
 
 </script>
 
-<div class="system-page">
+<div class="system-page workspace-page">
+  <PageHeader title="System Metrics" description="Monitor resource usage and performance across your selected runs." />
   {#if !appBootstrapReady || (!hasLoaded && !loadError)}
     <LoadingTrackio />
   {:else if loadError && !hasLoaded}
@@ -509,7 +544,9 @@
     <div class="empty-state">
       <h2>No System Metrics Available</h2>
       <p>System metrics will appear here once logged. To enable automatic logging:</p>
-      <pre><code>{'import trackio\n\n# CPU/system metrics auto-enable when psutil is installed:\nrun = trackio.init(project="my-project")\n\n# Or explicitly enable/disable them:\nrun = trackio.init(project="my-project", auto_log_cpu=True)\n\n# Manually log at any time:\ntrackio.log_cpu()\ntrackio.log_gpu()'}</code></pre>
+      <CodeSnippet
+        code={`import trackio\n\n# CPU/system metrics auto-enable when psutil is installed:\nrun = trackio.init(project="${project || "my-project"}")\n\n# Or explicitly enable/disable them:\nrun = trackio.init(project="${project || "my-project"}", auto_log_cpu=True)\n\n# Manually log at any time:\ntrackio.log_cpu()\ntrackio.log_gpu()`}
+      />
       <p><strong>Setup:</strong></p>
       <ul>
         <li><strong>CPU/system metrics:</strong> <code>pip install trackio[cpu]</code> (requires <code>psutil</code>)</li>
@@ -597,7 +634,9 @@
 
 <style>
   .system-page {
-    padding: 20px 24px;
+    min-width: 0;
+    box-sizing: border-box;
+    padding: 28px;
     overflow-y: auto;
     flex: 1;
     min-height: 0;
@@ -610,45 +649,7 @@
   .subgroup-list {
     margin-top: 16px;
   }
-  .empty-state {
-    max-width: 640px;
-    padding: 40px 24px;
-    color: var(--body-text-color, #1f2937);
-  }
-  .empty-state h2 {
-    margin: 0 0 8px;
-    font-size: 20px;
-    font-weight: 700;
-  }
-  .empty-state p {
-    margin: 12px 0 8px;
-    color: var(--body-text-color-subdued, #6b7280);
-  }
-  .empty-state pre {
-    background: var(--background-fill-secondary, #f9fafb);
-    padding: 16px;
-    border-radius: var(--radius-lg, 8px);
-    border: 1px solid var(--border-color-primary, #e5e7eb);
-    font-size: 13px;
-    overflow-x: auto;
-  }
-  .empty-state ul {
-    list-style: disc;
-    padding-left: 20px;
-    margin: 4px 0 0;
-  }
-  .empty-state li {
-    margin: 4px 0;
-    color: var(--body-text-color, #1f2937);
-  }
-  .empty-state code {
-    background: var(--background-fill-secondary, #f0f0f0);
-    padding: 1px 5px;
-    border-radius: var(--radius-sm, 4px);
-    font-size: 13px;
-  }
-  .empty-state pre code {
-    background: none;
-    padding: 0;
+  @media (max-width: 700px) {
+    .system-page { padding: 20px 16px; }
   }
 </style>

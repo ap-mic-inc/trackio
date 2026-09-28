@@ -219,6 +219,9 @@ Props:
 <style>
   .run-comparer {
     margin-bottom: 12px;
+    position: relative;
+    z-index: 1;
+    isolation: isolate;
   }
   .comparer-title {
     margin-bottom: 10px;

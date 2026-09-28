@@ -74,4 +74,5 @@ Hugging Face–specific options such as `dataset_id` (deprecated; use `bucket_id
 ## Related
 
 - [Launch the Dashboard](launch.md) — CLI options, port, and remote access
+- [Authentication & Admin](oidc_auth.md) — local accounts, OIDC sign-in, per-user write permissions
 - [Environment Variables](environment_variables.md) — `TRACKIO_SERVER_URL`, `TRACKIO_DIR`, and others

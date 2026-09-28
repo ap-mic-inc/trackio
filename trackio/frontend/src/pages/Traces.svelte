@@ -1,4 +1,5 @@
 <script>
+  import PageHeader from "../components/PageHeader.svelte";
   import LoadingTrackio from "../components/LoadingTrackio.svelte";
   import { getMediaUrl, getTraces, getTraceSteps } from "../lib/api.js";
   import {
@@ -418,21 +419,22 @@
   }
 </script>
 
-<div class="traces-page">
+<div class="traces-page workspace-page">
+  <PageHeader title="Traces" description="Inspect requests, timing, and individual operations." />
   {#if !project}
     <div class="empty-state">
       <h2>Select a project</h2>
       <p>Pick a project to browse trace logs.</p>
     </div>
   {:else if selectedRuns.length === 0}
-    <div class="empty-state">
-      <h2>No runs selected</h2>
-      <p>Select one or more runs in the sidebar to browse traces.</p>
+    <div class="empty-state no-run-selected-state">
+      <h2>No run selected</h2>
+      <p>Select one or more runs in the sidebar.</p>
     </div>
   {:else}
     <div class="toolbar">
       <div class="search-wrap">
-        <input type="text" bind:value={search} placeholder="Search traces by request" />
+        <input type="text" bind:value={search} placeholder="Search traces by request" aria-label="Search traces" />
       </div>
       <label class="filter-wrap">
         <span>Step:</span>
@@ -720,22 +722,37 @@
 
 <style>
   .traces-page {
-    padding: 20px 24px;
+    min-width: 0;
+    box-sizing: border-box;
+    padding: 28px;
     overflow-y: auto;
     flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
     background: var(--background-fill-primary, white);
   }
+  .traces-page .no-run-selected-state {
+    flex: 0 0 auto;
+  }
   .toolbar {
+    flex-wrap: wrap;
+    padding: 14px;
+    border: 1px solid var(--border-color-primary, #e5e7eb);
+    border-radius: 10px;
+    background: var(--background-fill-secondary, #f9fafb);
     display: flex;
     align-items: center;
     gap: 12px;
     margin-bottom: 16px;
   }
   .search-wrap {
+    min-width: min(240px, 100%);
     flex: 1;
   }
   .search-wrap input,
   .filter-wrap select {
+    box-sizing: border-box;
     width: 100%;
     border: 1px solid var(--border-color-primary, #e5e7eb);
     border-radius: var(--radius-md, 6px);
@@ -1175,20 +1192,6 @@
     border: 1px solid var(--border-color-primary, #e5e7eb);
     border-radius: var(--radius-md, 6px);
   }
-  .empty-state {
-    max-width: 640px;
-    padding: 40px 24px;
-    color: var(--body-text-color, #1f2937);
-  }
-  .empty-state h2 {
-    margin: 0 0 8px;
-    font-size: 20px;
-    font-weight: 700;
-  }
-  .empty-state p {
-    margin: 12px 0 8px;
-    color: var(--body-text-color-subdued, #6b7280);
-  }
   .pagination {
     display: flex;
     align-items: center;
@@ -1240,5 +1243,8 @@
       border-right: 0;
       border-bottom: 1px solid var(--border-color-primary, #e5e7eb);
     }
+  }
+  @media (max-width: 700px) {
+    .traces-page { padding: 20px 16px; }
   }
 </style>

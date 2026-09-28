@@ -1,4 +1,7 @@
 <script>
+  import PageHeader from "../components/PageHeader.svelte";
+  import ProjectRunGuides from "../components/ProjectRunGuides.svelte";
+  import CodeSnippet from "../components/CodeSnippet.svelte";
   import { tick } from "svelte";
   import LoadingTrackio from "../components/LoadingTrackio.svelte";
   import {
@@ -154,14 +157,20 @@
   }
 </script>
 
-<div class="runs-page">
+<div class="runs-page workspace-page">
+  <PageHeader title="Runs" description="Review experiment runs, compare progress, and manage your history." count={loading ? null : runsData.length} />
+  {#if project}
+    <ProjectRunGuides {project} />
+  {/if}
   {#if loading}
     <LoadingTrackio />
   {:else if runsData.length === 0}
     <div class="empty-state">
       <h2>No runs in this project</h2>
       <p>Runs are created when you call <code>trackio.init()</code> and log at least one step. Example:</p>
-      <pre><code>{'import trackio\ntrackio.init(project="my-project")\nfor i in range(10):\n    trackio.log({"loss": 1 / (i + 1)})\ntrackio.finish()'}</code></pre>
+      <CodeSnippet
+        code={`import trackio\n\ntrackio.init(project="${project || "my-project"}")\nfor i in range(10):\n    trackio.log({"loss": 1 / (i + 1)})\ntrackio.finish()`}
+      />
       <p>Refresh this page or wait for the dashboard to poll; new runs appear in the table with step counts.</p>
     </div>
   {:else}
@@ -170,49 +179,22 @@
         <span class="filter-count">{filteredRuns.length} of {runsData.length} runs</span>
       </div>
     {/if}
+    <div class="runs-table-wrap">
     <table class="runs-table">
       <thead>
         <tr>
-          <th>Actions</th>
           <th>Run Name</th>
           <th>Steps</th>
           <th>Last Step</th>
           {#if hasArtifacts}
             <th>Artifacts</th>
           {/if}
+          <th class="actions-th"><span class="sr-only">Actions</span></th>
         </tr>
       </thead>
       <tbody>
         {#each filteredRuns as run, i}
           <tr>
-            <td class="actions-cell">
-              <div class="actions-wrap">
-              <button
-                class="action-btn"
-                title={canMutateRuns ? "Rename" : "Sign in with Hugging Face (write access) to rename runs"}
-                disabled={!canMutateRuns}
-                onclick={() => startRename(i, run.name)}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M17 3a2.83 2.83 0 114 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>
-                </svg>
-              </button>
-              <button
-                class="action-btn delete-btn"
-                title={canMutateRuns ? "Delete" : "Sign in with Hugging Face (write access) to delete runs"}
-                disabled={!canMutateRuns}
-                onclick={() => handleDelete(run)}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <polyline points="3 6 5 6 21 6"/>
-                  <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
-                  <path d="M10 11v6"/>
-                  <path d="M14 11v6"/>
-                  <path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/>
-                </svg>
-              </button>
-              </div>
-            </td>
             <td class="run-name-cell">
               {#if renamingIndex === i}
                 <input
@@ -264,50 +246,55 @@
                 {/if}
               </td>
             {/if}
+            <td class="actions-cell">
+              <div class="actions-wrap">
+              <button
+                class="action-btn"
+                title={canMutateRuns ? "Rename" : "Sign in with Hugging Face (write access) to rename runs"}
+                disabled={!canMutateRuns}
+                onclick={() => startRename(i, run.name)}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M17 3a2.83 2.83 0 114 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>
+                </svg>
+              </button>
+              <button
+                class="action-btn delete-btn"
+                title={canMutateRuns ? "Delete" : "Sign in with Hugging Face (write access) to delete runs"}
+                disabled={!canMutateRuns}
+                onclick={() => handleDelete(run)}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="3 6 5 6 21 6"/>
+                  <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
+                  <path d="M10 11v6"/>
+                  <path d="M14 11v6"/>
+                  <path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/>
+                </svg>
+              </button>
+              </div>
+            </td>
           </tr>
         {/each}
       </tbody>
     </table>
+    </div>
+    {#if filteredRuns.length === 0}
+      <p class="no-matches" role="status">No runs match your search. Try a different name or clear the sidebar filter.</p>
+    {/if}
   {/if}
 </div>
 
 <style>
+  .runs-table-wrap { overflow-x: auto; border: 1px solid var(--border-color-primary, #e5e7eb); border-radius: var(--radius-xl, 10px); box-shadow: var(--shadow-drop, 0 1px 2px rgba(0, 0, 0, 0.05)); }
+  .no-matches { padding: 24px; text-align: center; color: var(--body-text-color-subdued, #6b7280); font-size: 13px; }
+
   .runs-page {
-    padding: 20px 24px;
+    min-width: 0;
+    box-sizing: border-box;
+    padding: 28px;
     overflow-y: auto;
     flex: 1;
-  }
-  .empty-state {
-    max-width: 640px;
-    padding: 40px 24px;
-    color: var(--body-text-color, #1f2937);
-  }
-  .empty-state h2 {
-    margin: 0 0 8px;
-    font-size: 20px;
-    font-weight: 700;
-  }
-  .empty-state p {
-    margin: 12px 0 8px;
-    color: var(--body-text-color-subdued, #6b7280);
-  }
-  .empty-state pre {
-    background: var(--background-fill-secondary, #f9fafb);
-    padding: 16px;
-    border-radius: var(--radius-lg, 8px);
-    border: 1px solid var(--border-color-primary, #e5e7eb);
-    font-size: 13px;
-    overflow-x: auto;
-  }
-  .empty-state code {
-    background: var(--background-fill-secondary, #f0f0f0);
-    padding: 1px 5px;
-    border-radius: var(--radius-sm, 4px);
-    font-size: 13px;
-  }
-  .empty-state pre code {
-    background: none;
-    padding: 0;
   }
   .filter-count-row {
     margin-bottom: 12px;
@@ -323,27 +310,48 @@
   }
   .runs-table th {
     text-align: left;
-    padding: 8px 12px;
-    border-bottom: 2px solid var(--border-color-primary, #e5e7eb);
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border-color-primary, #e5e7eb);
     color: var(--body-text-color-subdued, #6b7280);
     font-weight: 600;
-    font-size: var(--text-sm, 12px);
+    font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 0.05em;
+    background: var(--background-fill-secondary, #f9fafb);
+    white-space: nowrap;
   }
   .runs-table td {
-    padding: 8px 12px;
+    padding: 12px 16px;
     border-bottom: 1px solid var(--border-color-primary, #e5e7eb);
     color: var(--body-text-color, #1f2937);
+    font-variant-numeric: tabular-nums;
   }
-  .runs-table tbody tr:nth-child(odd) {
-    background: var(--table-odd-background-fill, var(--background-fill-primary, white));
+  .runs-table tbody tr {
+    background: var(--background-fill-primary, white);
+    transition: background-color 0.1s;
   }
-  .runs-table tbody tr:nth-child(even) {
-    background: var(--table-even-background-fill, var(--background-fill-secondary, #f9fafb));
+  .runs-table tbody tr:last-child td {
+    border-bottom: none;
   }
-  .runs-table tr:hover {
-    background: var(--background-fill-secondary, #f3f4f6);
+  .runs-table tbody tr:hover {
+    background: var(--background-fill-secondary, #f9fafb);
+  }
+  .actions-th {
+    width: 1%;
+  }
+  .actions-cell {
+    text-align: right;
+  }
+  .actions-cell .actions-wrap {
+    justify-content: flex-end;
+  }
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
   }
   .run-name-cell {
     font-weight: 500;
@@ -363,7 +371,7 @@
   .link-btn {
     background: none;
     border: none;
-    color: var(--color-accent, #f97316);
+    color: var(--body-text-color, #1f2937);
     cursor: pointer;
     font: inherit;
     font-weight: 500;
@@ -371,7 +379,9 @@
     text-align: left;
   }
   .link-btn:hover {
+    color: var(--color-accent, #f97316);
     text-decoration: underline;
+    text-underline-offset: 3px;
   }
   .rename-input {
     font: inherit;
@@ -429,5 +439,8 @@
   }
   .art-none {
     color: var(--body-text-color-subdued, #9ca3af);
+  }
+  @media (max-width: 700px) {
+    .runs-page { padding: 20px 16px; }
   }
 </style>

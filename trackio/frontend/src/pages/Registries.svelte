@@ -38,6 +38,8 @@
   function sourceLocation(link) {
     if (link.source_space_id) return `Space · ${link.source_space_id}`;
     if (link.source_bucket_id) return `Bucket · ${link.source_bucket_id}`;
+    if (link.source_server_base_url)
+      return `Server · ${link.source_server_base_url}`;
     return "Local";
   }
 
@@ -139,7 +141,7 @@
   });
 </script>
 
-<div class="registry-page">
+<div class="registry-page workspace-page">
   <header class="page-header">
     <div>
       <h1>Registries</h1>
@@ -386,8 +388,6 @@
   .event-kind { width: fit-content; border-radius: 10px; padding: 2px 7px; color: var(--color-accent, #f97316); background: var(--color-accent-soft, #fff7ed); font-weight: 600; }
   .event-description { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   time { color: var(--body-text-color-subdued, #6b7280); }
-  .empty-state { max-width: 560px; margin: 70px auto; padding: 28px; text-align: center; color: var(--body-text-color-subdued, #6b7280); }
-  .empty-state h2 { margin-bottom: 7px; color: var(--body-text-color, #1f2937); }
   .error-state { color: #b91c1c; }
   @media (max-width: 900px) {
     .page-header { align-items: flex-start; flex-direction: column; }

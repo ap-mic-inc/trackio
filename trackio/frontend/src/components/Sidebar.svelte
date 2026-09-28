@@ -41,6 +41,9 @@
     spacesMode = false,
     runMutationAllowed = true,
     mutationAuth = "local",
+    oidcEnabled = false,
+    loginEnabled = false,
+    authUser = null,
     readOnlySource = null,
     projectLocked = false,
     spaceId = null,
@@ -70,11 +73,25 @@
     return `${window.location.origin}${window.__trackio_base || ""}/oauth/hf/start`;
   });
 
-
-  let availableXAxes = $derived.by(() => {
-    let axes = ["step", "time", ...metricColumns];
-    return axes;
+  let oidcLoginHref = $derived.by(() => {
+    navTick;
+    return `${window.location.origin}${window.__trackio_base || ""}/login`;
   });
+
+
+  const COMMON_X_AXES = [
+    { value: "step", label: "Step" },
+    { value: "time", label: "Time" },
+  ];
+
+  let metricAxisSelection = $derived(
+    metricColumns.includes(xAxis) ? xAxis : "",
+  );
+
+  function handleMetricAxisChange(e) {
+    const value = e.target.value;
+    if (value) xAxis = value;
+  }
 
   function setIndeterminate(node, value) {
     node.indeterminate = value;
@@ -375,11 +392,13 @@
             showLabel={false}
           />
           <div class="group-by-row">
+            <span class="group-by-label">Group runs by</span>
             <Dropdown
               label="Group by"
               choices={groupByOptions}
               bind:value={groupByRaw}
               filterable={false}
+              showLabel={false}
             />
           </div>
           {#if groupedRuns}
@@ -473,71 +492,97 @@
         </div>
 
         {#if currentPage === "metrics" || currentPage === "system"}
-          <span class="section-label">Display Settings</span>
-
-          <div class="section">
-            <GradioCheckbox
-              label="Refresh metrics realtime"
-              bind:checked={realtimeEnabled}
-            />
-            <GradioCheckbox
-              label="Show section headers"
-              bind:checked={showHeaders}
-            />
-            {#if currentPage === "metrics"}
-              <GradioCheckbox
-                label="Show run comparer"
-                bind:checked={showComparer}
-              />
-            {/if}
-          </div>
-
-          <div class="section">
-            <GradioSlider
-              label="Smoothing Factor (0 = no smoothing)"
-              bind:value={smoothing}
-              min={0}
-              max={100}
-              step={1}
-            />
-          </div>
-
-          {#if currentPage === "metrics"}
+          <div class="sidebar-group">
+            <span class="group-title">Panels</span>
             <div class="section">
-              <Dropdown
-                label="Plots per row"
-                info="Auto fits plots to the available width, up to 4 per row."
-                choices={PANELS_PER_ROW_CHOICES}
-                bind:value={panelsPerRow}
-                filterable={false}
+              <GradioTextbox
+                label="Metric Filter"
+                info="Filter metrics using regex patterns. Leave empty to show all metrics."
+                placeholder="e.g., loss|ndcg@10|gpu"
+                bind:value={metricFilter}
               />
             </div>
-          {/if}
-
-          <div class="section">
-            <Dropdown
-              label="X-axis"
-              choices={availableXAxes}
-              bind:value={xAxis}
-              filterable={false}
-            />
-            <GradioCheckbox
-              label="Log scale X-axis"
-              bind:checked={logScaleX}
-            />
-            <GradioCheckbox
-              label="Log scale Y-axis"
-              bind:checked={logScaleY}
-            />
+            {#if currentPage === "metrics"}
+              <div class="section">
+                <Dropdown
+                  label="Plots per row"
+                  info="Auto fits plots to the available width, up to 5 per row."
+                  choices={PANELS_PER_ROW_CHOICES}
+                  bind:value={panelsPerRow}
+                  filterable={false}
+                />
+              </div>
+            {/if}
+            <div class="section">
+              <GradioCheckbox
+                label="Show section headers"
+                bind:checked={showHeaders}
+              />
+              {#if currentPage === "metrics"}
+                <GradioCheckbox
+                  label="Show run comparer"
+                  bind:checked={showComparer}
+                />
+              {/if}
+            </div>
           </div>
 
-          <div class="section">
-            <GradioTextbox
-              label="Metric Filter"
-              info="Filter metrics using regex patterns. Leave empty to show all metrics."
-              placeholder="e.g., loss|ndcg@10|gpu"
-              bind:value={metricFilter}
-            />
+          <div class="sidebar-group">
+            <span class="group-title">X-axis &amp; smoothing</span>
+            <div class="section">
+              <div class="xaxis-row">
+                {#each COMMON_X_AXES as axis}
+                  <button
+                    class="xaxis-tab"
+                    class:active={xAxis === axis.value}
+                    onclick={() => (xAxis = axis.value)}
+                  >
+                    {axis.label}
+                  </button>
+                {/each}
+                {#if metricColumns.length > 0}
+                  <select
+                    class="xaxis-metric"
+                    class:active={metricAxisSelection !== ""}
+                    value={metricAxisSelection}
+                    onchange={handleMetricAxisChange}
+                    aria-label="Use a logged metric as the X-axis"
+                  >
+                    <option value="" disabled>Metric…</option>
+                    {#each metricColumns as m}
+                      <option value={m}>{m}</option>
+                    {/each}
+                  </select>
+                {/if}
+              </div>
+              <GradioCheckbox
+                label="Log scale X-axis"
+                bind:checked={logScaleX}
+              />
+              <GradioCheckbox
+                label="Log scale Y-axis"
+                bind:checked={logScaleY}
+              />
+            </div>
+            <div class="section">
+              <GradioSlider
+                label="Smoothing (0 = off)"
+                bind:value={smoothing}
+                min={0}
+                max={100}
+                step={1}
+              />
+            </div>
+          </div>
+
+          <div class="sidebar-group">
+            <span class="group-title">Live updates</span>
+            <div class="section">
+              <GradioCheckbox
+                label="Refresh metrics realtime"
+                bind:checked={realtimeEnabled}
+              />
+            </div>
           </div>
         {/if}
       {/if}
@@ -569,8 +614,26 @@
         </div>
       {:else if spacesMode && runMutationAllowed && mutationAuth === "oauth"}
         <div class="oauth-footer">
-          <p class="oauth-signed-in">Signed in with Hugging Face</p>
-          <a class="oauth-logout" href={`${window.__trackio_base || ""}/oauth/logout`} onclick={() => { sessionStorage.removeItem("trackio_oauth_session"); }}>Logout</a>
+          <div class="oauth-account-row">
+            <p class="oauth-signed-in">Signed in with Hugging Face</p>
+            <a class="oauth-logout" href={`${window.__trackio_base || ""}/oauth/logout`} onclick={() => { sessionStorage.removeItem("trackio_oauth_session"); }}>Logout</a>
+          </div>
+        </div>
+      {:else if !spacesMode && (mutationAuth === "oidc" || mutationAuth === "oidc_insufficient")}
+        <div class="oauth-footer">
+          <div class="oauth-account-row">
+            <p class="oauth-signed-in">Signed in as {authUser}</p>
+            <a class="oauth-logout" href={`${window.__trackio_base || ""}/oauth/logout`}>Logout</a>
+          </div>
+          {#if mutationAuth === "oidc_insufficient"}
+            <p class="oauth-line oauth-warn">
+              This account does not have write access to this server.
+            </p>
+          {/if}
+        </div>
+      {:else if !spacesMode && (loginEnabled || oidcEnabled) && !runMutationAllowed}
+        <div class="oauth-footer">
+          <a class="oidc-login-btn" href={oidcLoginHref}>Sign in</a>
         </div>
       {/if}
   {/snippet}
@@ -646,6 +709,26 @@
   .hf-login-btn:hover {
     background: rgb(40, 48, 66);
   }
+  .oidc-login-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    padding: 8px 12px;
+    font-size: 13px;
+    font-weight: 600;
+    color: white;
+    background: var(--primary-600, #ea580c);
+    border-radius: var(--radius-lg, 8px);
+    text-decoration: none;
+    border: none;
+    cursor: pointer;
+    box-sizing: border-box;
+    transition: background-color 0.15s;
+  }
+  .oidc-login-btn:hover {
+    background: var(--primary-700, #c2410c);
+  }
   .hf-logo {
     width: 20px;
     height: 20px;
@@ -662,6 +745,12 @@
     font-size: 12px;
     color: var(--body-text-color-subdued, #6b7280);
   }
+  .oauth-account-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
   .oauth-logout {
     font-size: 12px;
     color: var(--body-text-color-subdued, #9ca3af);
@@ -675,6 +764,75 @@
   .section {
     margin-top: 2px;
     margin-bottom: 18px;
+  }
+  .sidebar-group {
+    margin-top: 4px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border-color-primary, #e5e7eb);
+  }
+  .sidebar-group .section:last-child {
+    margin-bottom: 14px;
+  }
+  .group-title {
+    display: block;
+    margin-bottom: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--body-text-color-subdued, #6b7280);
+  }
+  .runs-header .section-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .xaxis-row {
+    display: flex;
+    align-items: stretch;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin: 2px 0 10px;
+  }
+  .xaxis-tab {
+    padding: 5px 16px;
+    border: 1px solid var(--border-color-primary, #e5e7eb);
+    border-radius: var(--radius-md, 6px);
+    background: var(--input-background-fill, white);
+    color: var(--body-text-color-subdued, #6b7280);
+    font-size: 12.5px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s, background-color 0.15s;
+  }
+  .xaxis-tab:hover {
+    color: var(--body-text-color, #1f2937);
+  }
+  .xaxis-tab.active {
+    border-color: var(--color-accent, #f97316);
+    background: var(--color-accent-soft, #fff7ed);
+    color: var(--body-text-color, #1f2937);
+    font-weight: 600;
+  }
+  .xaxis-metric {
+    flex: 1 1 90px;
+    min-width: 0;
+    max-width: 100%;
+    padding: 5px 8px;
+    border: 1px solid var(--border-color-primary, #e5e7eb);
+    border-radius: var(--radius-md, 6px);
+    background: var(--input-background-fill, white);
+    color: var(--body-text-color-subdued, #6b7280);
+    font: inherit;
+    font-size: 12.5px;
+    cursor: pointer;
+  }
+  .xaxis-metric.active {
+    border-color: var(--color-accent, #f97316);
+    background: var(--color-accent-soft, #fff7ed);
+    color: var(--body-text-color, #1f2937);
+    font-weight: 600;
   }
   .share-tabs {
     display: flex;
@@ -714,7 +872,7 @@
     font-size: 12px;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     color: var(--body-text-color, #1f2937);
-    background: var(--background-fill-secondary, #f9fafb);
+    background: var(--input-background-fill, white);
     resize: vertical;
   }
   .copy-btn {
@@ -870,7 +1028,25 @@
     color: var(--body-text-color, #1f2937);
   }
   .group-by-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
     margin-top: 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--border-color-primary, #e5e7eb);
+    border-radius: var(--radius-md, 6px);
+    background: var(--background-fill-secondary, #f9fafb);
+  }
+  .group-by-label {
+    flex-shrink: 0;
+    color: var(--body-text-color-subdued, #6b7280);
+    font-size: 12px;
+    font-weight: 500;
+  }
+  .group-by-row :global(.dropdown-container) {
+    flex: 1;
+    min-width: 0;
+    margin-bottom: 0;
   }
   .grouped-runs {
     margin-top: 8px;

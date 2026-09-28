@@ -392,7 +392,7 @@ def test_local_dashboard_upload_api_accepts_only_server_uploaded_paths(temp_dir)
         )
         assert blocked_upload_response.status_code == 400
         assert blocked_upload_response.json() == {
-            "error": "A write_token is required to upload files to this server. Use the write-access URL from trackio.show(), set TRACKIO_WRITE_TOKEN, or send header X-Trackio-Write-Token."
+            "error": "A write_token is required to upload files to this server. Use the write-access URL from trackio.show(), set TRACKIO_WRITE_TOKEN, send header X-Trackio-Write-Token, or sign in via OIDC with write access."
         }
 
         with source_path.open("rb") as handle:

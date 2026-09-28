@@ -1,5 +1,6 @@
 import * as staticApi from "./staticApi.js";
 import { registerRateLimitHit } from "./hostPolling.js";
+import { summarizeRun } from "./runStatus.js";
 
 const BASE = window.__trackio_base || "";
 
@@ -9,7 +10,7 @@ let _mediaDir = "";
 
 async function _detectStaticMode() {
   try {
-    const resp = await fetch(`${BASE}/config.json`);
+    const resp = await fetch(`${BASE}/config.json`, { signal: AbortSignal.timeout(15000) });
     if (resp.ok) {
       const cfg = await resp.json();
       if (cfg.mode === "static") {
@@ -34,12 +35,22 @@ export async function isStaticMode() {
   return _staticModePromise;
 }
 
+export async function getTrackioVersion() {
+  if (await isStaticMode()) return staticApi.getTrackioVersion();
+  const resp = await fetch(`${BASE}/version`);
+  if (!resp.ok) {
+    throw new Error(`Version request failed: ${resp.status}`);
+  }
+  const data = await resp.json();
+  return data.version || null;
+}
+
 function getOauthSessionHeader() {
   const sid = sessionStorage.getItem("trackio_oauth_session");
   return sid ? { "x-trackio-oauth-session": sid } : {};
 }
 
-export async function callApi(apiName, params = {}) {
+export async function callApi(apiName, params = {}, options = {}) {
   const cleanApiName = apiName.startsWith("/") ? apiName.slice(1) : apiName;
   const url = `${BASE}/api/${cleanApiName}`;
   const resp = await fetch(url, {
@@ -47,6 +58,7 @@ export async function callApi(apiName, params = {}) {
     credentials: "include",
     headers: { "Content-Type": "application/json", ...getOauthSessionHeader() },
     body: JSON.stringify(params),
+    signal: options.signal,
   });
   if (resp.status === 429) {
     registerRateLimitHit();
@@ -94,11 +106,16 @@ export async function getLogs(project, run, options = {}) {
   return await callApi("/get_logs", params);
 }
 
-export async function getLogsBatch(project, runs, options = {}) {
+export async function getLogsBatch(
+  project,
+  runs,
+  options = {},
+  requestOptions = {},
+) {
   if (await isStaticMode()) {
     const out = [];
     for (const run of runs) {
-      const logs = await staticApi.getLogs(project, run, options);
+      const logs = await staticApi.getLogs(project, run, options, requestOptions);
       out.push({ ...normalizeRun(run), logs });
     }
     return out;
@@ -108,7 +125,7 @@ export async function getLogsBatch(project, runs, options = {}) {
     runs: runs.map((run) => normalizeRun(run)),
     ...options,
   };
-  return await callApi("/get_logs_batch", payload);
+  return await callApi("/get_logs_batch", payload, requestOptions);
 }
 
 export async function getTraces(project, run, options = {}) {
@@ -126,6 +143,19 @@ export async function getTraceSteps(project, run) {
 export async function getProjectSummary(project) {
   if (await isStaticMode()) return staticApi.getProjectSummary(project);
   return await callApi("/get_project_summary", { project });
+}
+
+export async function getRunStatus(project, { signal } = {}) {
+  const snapshot = await isStaticMode();
+  signal?.throwIfAborted();
+  if (snapshot) {
+    const summary = await staticApi.getProjectSummary(project);
+    const runs = await Promise.all(summary.runs.map(async (record) =>
+      summarizeRun(record, await staticApi.getLogs(project, record, { scalar_only: true })),
+    ));
+    return { runs, tail_rows: 50, snapshot: true };
+  }
+  return await callApi("/get_run_status", { project }, { signal });
 }
 
 export async function getRunSummary(project, run) {
@@ -146,25 +176,30 @@ export async function getSystemMetricsForRun(project, run) {
   return await callApi("/get_system_metrics_for_run", params);
 }
 
-export async function getSystemLogs(project, run) {
+export async function getSystemLogs(project, run, requestOptions = {}) {
   const params = { project, ...normalizeRun(run) };
-  if (await isStaticMode()) return staticApi.getSystemLogs(project, run);
-  return await callApi("/get_system_logs", params);
+  if (await isStaticMode())
+    return staticApi.getSystemLogs(project, run, requestOptions);
+  return await callApi("/get_system_logs", params, requestOptions);
 }
 
-export async function getSystemLogsBatch(project, runs) {
+export async function getSystemLogsBatch(project, runs, requestOptions = {}) {
   if (await isStaticMode()) {
     const out = [];
     for (const run of runs) {
-      const logs = await staticApi.getSystemLogs(project, run);
+      const logs = await staticApi.getSystemLogs(project, run, requestOptions);
       out.push({ ...normalizeRun(run), logs });
     }
     return out;
   }
-  return await callApi("/get_system_logs_batch", {
-    project,
-    runs: runs.map((run) => normalizeRun(run)),
-  });
+  return await callApi(
+    "/get_system_logs_batch",
+    {
+      project,
+      runs: runs.map((run) => normalizeRun(run)),
+    },
+    requestOptions,
+  );
 }
 
 export async function getSnapshot(project, run, step) {
@@ -273,6 +308,38 @@ export async function getTabAvailability(project) {
 export async function getRunMutationStatus() {
   if (await isStaticMode()) return staticApi.getRunMutationStatus();
   return await callApi("/get_run_mutation_status", {});
+}
+
+export async function getAdminUsers() {
+  return await callApi("/admin_get_users", {});
+}
+
+export async function revokeUserSessions(sub) {
+  return await callApi("/admin_revoke_user_sessions", { sub });
+}
+
+export async function adminSetRole(sub, role) {
+  return await callApi("/admin_set_role", { sub, role });
+}
+
+export async function adminCreateUser(username, password, role) {
+  return await callApi("/admin_create_user", { username, password, role });
+}
+
+export async function adminResetPassword(sub, password) {
+  return await callApi("/admin_reset_password", { sub, password });
+}
+
+export async function adminGetAuthSettings() {
+  return await callApi("/admin_get_auth_settings", {});
+}
+
+export async function adminSetAuthSettings(settings) {
+  return await callApi("/admin_set_auth_settings", { settings });
+}
+
+export async function adminTestOidc(issuer) {
+  return await callApi("/admin_test_oidc", { issuer });
 }
 
 export async function deleteRun(project, run) {
