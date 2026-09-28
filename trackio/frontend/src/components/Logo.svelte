@@ -8,6 +8,7 @@
 <script>
   import { onMount } from "svelte";
   import { getTrackioVersion } from "../lib/api.js";
+  import { navigateTo } from "../lib/router.js";
 
   let { logoUrls = DEFAULT_LOGO_URLS, darkMode = false } = $props();
   let version = $state(null);
@@ -22,13 +23,21 @@
 </script>
 
 <div class="logo-section">
-  <img
-    src={darkMode ? logoUrls.dark : logoUrls.light}
-    alt="Trackio"
-    class="logo"
-  />
+  <button
+    class="logo-home"
+    type="button"
+    aria-label="Go to home"
+    title="Go to home"
+    onclick={() => navigateTo("overview")}
+  >
+    <img
+      src={darkMode ? logoUrls.dark : logoUrls.light}
+      alt=""
+      class="logo"
+    />
+  </button>
   {#if version}
-    <span class="version">v {version}</span>
+    <span class="version">APMIC v {version}</span>
   {/if}
 </div>
 
@@ -42,6 +51,19 @@
   .logo {
     display: block;
     width: 100%;
+  }
+  .logo-home {
+    display: block;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+  }
+  .logo-home:focus-visible {
+    outline: 2px solid var(--color-accent, #f97316);
+    outline-offset: 3px;
+    border-radius: 3px;
   }
   .version {
     position: absolute;

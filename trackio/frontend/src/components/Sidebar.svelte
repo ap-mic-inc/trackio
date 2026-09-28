@@ -392,11 +392,13 @@
             showLabel={false}
           />
           <div class="group-by-row">
+            <span class="group-by-label">Group runs by</span>
             <Dropdown
               label="Group by"
               choices={groupByOptions}
               bind:value={groupByRaw}
               filterable={false}
+              showLabel={false}
             />
           </div>
           {#if groupedRuns}
@@ -612,25 +614,26 @@
         </div>
       {:else if spacesMode && runMutationAllowed && mutationAuth === "oauth"}
         <div class="oauth-footer">
-          <p class="oauth-signed-in">Signed in with Hugging Face</p>
-          <a class="oauth-logout" href={`${window.__trackio_base || ""}/oauth/logout`} onclick={() => { sessionStorage.removeItem("trackio_oauth_session"); }}>Logout</a>
+          <div class="oauth-account-row">
+            <p class="oauth-signed-in">Signed in with Hugging Face</p>
+            <a class="oauth-logout" href={`${window.__trackio_base || ""}/oauth/logout`} onclick={() => { sessionStorage.removeItem("trackio_oauth_session"); }}>Logout</a>
+          </div>
         </div>
       {:else if !spacesMode && (mutationAuth === "oidc" || mutationAuth === "oidc_insufficient")}
         <div class="oauth-footer">
-          <p class="oauth-signed-in">Signed in as {authUser}</p>
+          <div class="oauth-account-row">
+            <p class="oauth-signed-in">Signed in as {authUser}</p>
+            <a class="oauth-logout" href={`${window.__trackio_base || ""}/oauth/logout`}>Logout</a>
+          </div>
           {#if mutationAuth === "oidc_insufficient"}
             <p class="oauth-line oauth-warn">
               This account does not have write access to this server.
             </p>
           {/if}
-          <a class="oauth-logout" href={`${window.__trackio_base || ""}/oauth/logout`}>Logout</a>
         </div>
       {:else if !spacesMode && (loginEnabled || oidcEnabled) && !runMutationAllowed}
         <div class="oauth-footer">
           <a class="oidc-login-btn" href={oidcLoginHref}>Sign in</a>
-          <p class="oauth-hint">
-            Sign in to log metrics, upload files, and manage runs.
-          </p>
         </div>
       {/if}
   {/snippet}
@@ -741,6 +744,12 @@
     margin: 0;
     font-size: 12px;
     color: var(--body-text-color-subdued, #6b7280);
+  }
+  .oauth-account-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
   }
   .oauth-logout {
     font-size: 12px;
@@ -1019,7 +1028,25 @@
     color: var(--body-text-color, #1f2937);
   }
   .group-by-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
     margin-top: 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--border-color-primary, #e5e7eb);
+    border-radius: var(--radius-md, 6px);
+    background: var(--background-fill-secondary, #f9fafb);
+  }
+  .group-by-label {
+    flex-shrink: 0;
+    color: var(--body-text-color-subdued, #6b7280);
+    font-size: 12px;
+    font-weight: 500;
+  }
+  .group-by-row :global(.dropdown-container) {
+    flex: 1;
+    min-width: 0;
+    margin-bottom: 0;
   }
   .grouped-runs {
     margin-top: 8px;
