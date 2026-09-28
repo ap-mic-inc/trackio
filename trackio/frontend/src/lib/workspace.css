@@ -11,6 +11,17 @@
   font-size: 13px;
   line-height: 1.7;
 }
+/* Data-empty views should use the available workspace instead of appearing as
+   a narrow card centered in an otherwise empty tab. */
+.metrics-page > .empty-state,
+.system-page > .empty-state,
+.traces-page > .empty-state {
+  width: calc(100% + 56px);
+  max-width: none;
+  flex: 1;
+  margin: 0 -28px -28px;
+  border-radius: 0;
+}
 .workspace-page .empty-state h2 {
   margin: 0 0 8px;
   font-size: 18px;
@@ -50,4 +61,10 @@
 }
 @media (max-width: 700px) {
   .workspace-page .empty-state { margin: 16px auto; padding: 20px; }
+  .metrics-page > .empty-state,
+  .system-page > .empty-state,
+  .traces-page > .empty-state {
+    width: calc(100% + 32px);
+    margin: 0 -16px -16px;
+  }
 }

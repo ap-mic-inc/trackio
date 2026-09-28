@@ -427,9 +427,9 @@
       <p>Pick a project to browse trace logs.</p>
     </div>
   {:else if selectedRuns.length === 0}
-    <div class="empty-state">
-      <h2>No runs selected</h2>
-      <p>Select one or more runs in the sidebar to browse traces.</p>
+    <div class="empty-state no-run-selected-state">
+      <h2>No run selected</h2>
+      <p>Select one or more runs in the sidebar.</p>
     </div>
   {:else}
     <div class="toolbar">
@@ -727,7 +727,13 @@
     padding: 28px;
     overflow-y: auto;
     flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
     background: var(--background-fill-primary, white);
+  }
+  .traces-page .no-run-selected-state {
+    flex: 0 0 auto;
   }
   .toolbar {
     flex-wrap: wrap;
