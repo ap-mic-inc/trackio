@@ -1,7 +1,7 @@
 <script>
   import CodeSnippet from "../components/CodeSnippet.svelte";
 
-  let { project = null } = $props();
+  let { project = null, collapsible = false } = $props();
 
   let selectedGuide = $state("quickstart");
   let selectedStage = $state("pretrain");
@@ -137,6 +137,7 @@ trackio.finish()`,
 
 </script>
 
+{#snippet guideContent()}
 <div class="project-guides">
   <div class="guide-switch" role="tablist" aria-label="Project guides">
     <button
@@ -149,7 +150,7 @@ trackio.finish()`,
       tabindex={selectedGuide === "quickstart" ? 0 : -1}
       onclick={() => { selectedGuide = "quickstart"; }}
       onkeydown={(event) => handleGuideTabKeydown(event, "quickstart")}
-    >Python Quickstart</button>
+    >Quickstart</button>
     <button
       class="guide-switch-tab"
       class:active={selectedGuide === "recipes"}
@@ -164,7 +165,7 @@ trackio.finish()`,
   </div>
   {#if selectedGuide === "quickstart"}
       <div class="guide-card" id="project-guide-panel-quickstart" role="tabpanel" aria-labelledby="project-guide-tab-quickstart" tabindex="0">
-        <div class="guide-heading"><div><p class="guide-eyebrow">GET STARTED</p><h3 class="guide-title">Python Quickstart</h3></div><span class="guide-language">PYTHON</span></div>
+        <div class="guide-heading"><div><p class="guide-eyebrow">GET STARTED</p><h3 class="guide-title">Quickstart</h3></div><span class="guide-language">PYTHON</span></div>
         <p class="guide-desc">Copy-paste snippets for logging from your training script.</p>
         <div class="guide-tabs guide-subtabs">
           {#each quickstarts as q}
@@ -243,9 +244,27 @@ trackio.finish()`,
       </div>
   {/if}
 </div>
+{/snippet}
+
+{#if collapsible}
+  <details class="project-guides-collapsible">
+    <summary>Quickstart <span>View starter code and LLM training recipes</span></summary>
+    {@render guideContent()}
+  </details>
+{:else}
+  {@render guideContent()}
+{/if}
 
 <style>
   .project-guides { margin: 0 0 28px; }
+  .project-guides-collapsible { margin: 0 0 22px; }
+  .project-guides-collapsible > summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 14px; border: 1px solid var(--border-color-primary); border-radius: var(--radius-lg); background: var(--background-fill-primary); color: var(--body-text-color); font-size: 13px; font-weight: 600; cursor: pointer; list-style: none; }
+  .project-guides-collapsible > summary::-webkit-details-marker { display: none; }
+  .project-guides-collapsible > summary::after { content: "+"; color: var(--body-text-color-subdued); font-size: 16px; font-weight: 400; }
+  .project-guides-collapsible[open] > summary { border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
+  .project-guides-collapsible[open] > summary::after { content: "−"; }
+  .project-guides-collapsible > summary span { margin-left: auto; color: var(--body-text-color-subdued); font-size: 11px; font-weight: 400; }
+  .project-guides-collapsible .project-guides { margin-bottom: 0; }
   .guide-switch { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--border-color-primary); }
   .guide-switch-tab { flex-shrink: 0; padding: 10px 14px; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; background: transparent; color: var(--body-text-color-subdued); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap; }
   .guide-switch-tab:hover { color: var(--body-text-color); }

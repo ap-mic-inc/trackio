@@ -2,13 +2,20 @@
   import PageHeader from "../components/PageHeader.svelte";
   import CodeSnippet from "../components/CodeSnippet.svelte";
   import LoadingTrackio from "../components/LoadingTrackio.svelte";
-  import { getRunStatus } from "../lib/api.js";
+  import ProjectRunGuides from "../components/ProjectRunGuides.svelte";
+  import RunSummaryHeader from "../components/RunSummaryHeader.svelte";
+  import { getRunStatus, getRunSummary } from "../lib/api.js";
   import { buildColorMap } from "../lib/stores.js";
-  import { navigateTo, openRunDetail } from "../lib/router.js";
+  import { openRunDetail } from "../lib/router.js";
   import { getAppPollIntervalMs, isTabHidden, isRateLimitCooldownActive } from "../lib/hostPolling.js";
   import { createStatusLoader } from "../lib/runStatus.js";
 
-  let { project = null, runs = [] } = $props();
+  let {
+    project = null,
+    runs = [],
+    runConfigs = {},
+    onRunSelect = null,
+  } = $props();
 
   const LIVE_THRESHOLD_S = 120;
   const IDLE_THRESHOLD_S = 600;
@@ -25,9 +32,14 @@
   let tailRows = $state(50);
   let nowMs = $state(Date.now());
   let expandedRuns = $state({});
+  let detailsOpenRuns = $state({});
+  let searchableSummaries = $state({});
+  let searchSummaryLoading = $state(false);
   let query = $state("");
   let filter = $state("all");
   let loader = null;
+  let searchSummaryCache = new Map();
+  let searchSummaryToken = 0;
 
   let runColorMap = $derived(buildColorMap(runs));
 
@@ -41,6 +53,10 @@
     serverOffset = 0;
     snapshot = false;
     expandedRuns = {};
+    detailsOpenRuns = {};
+    searchSummaryCache.clear();
+    searchableSummaries = {};
+    searchSummaryToken++;
     query = "";
     filter = "all";
     if (!selectedProject) {
@@ -195,10 +211,80 @@
     expandedRuns = { ...expandedRuns, [key]: !expandedRuns[key] };
   }
 
+  function toggleRunDetails(run) {
+    const key = runKey(run);
+    detailsOpenRuns = { ...detailsOpenRuns, [key]: !detailsOpenRuns[key] };
+  }
+
+  function configSearchText(config) {
+    if (config == null) return "";
+    if (Array.isArray(config)) return config.map(configSearchText).join(" ");
+    if (typeof config === "object") {
+      return Object.entries(config)
+        .map(([key, value]) => `${key} ${configSearchText(value)}`)
+        .join(" ");
+    }
+    return String(config);
+  }
+
+  async function loadSearchableSummaries(selectedProject, candidates, token) {
+    let nextIndex = 0;
+    async function worker() {
+      while (nextIndex < candidates.length && token === searchSummaryToken) {
+        const run = candidates[nextIndex++];
+        const key = runKey(run);
+        try {
+          const summary = await getRunSummary(
+            selectedProject,
+            run.id != null ? { id: run.id, name: run.name } : run.name,
+          );
+          if (token !== searchSummaryToken) return;
+          searchSummaryCache.set(key, summary);
+          searchableSummaries = Object.fromEntries(searchSummaryCache);
+        } catch {
+          // Keep searching the run name, recent metrics, and loaded config.
+        }
+      }
+    }
+
+    await Promise.all(
+      Array.from({ length: Math.min(4, candidates.length) }, () => worker()),
+    );
+    if (token === searchSummaryToken) searchSummaryLoading = false;
+  }
+
+  $effect(() => {
+    const selectedProject = project;
+    const searchTerm = query.trim();
+    if (!selectedProject || !searchTerm) {
+      searchSummaryLoading = false;
+      return;
+    }
+
+    const candidates = runs.filter((run) => !searchSummaryCache.has(runKey(run)));
+    if (!candidates.length) {
+      searchSummaryLoading = false;
+      return;
+    }
+
+    const token = ++searchSummaryToken;
+    searchSummaryLoading = true;
+    const timer = setTimeout(
+      () => loadSearchableSummaries(selectedProject, candidates, token),
+      250,
+    );
+    return () => {
+      clearTimeout(timer);
+      if (token === searchSummaryToken) searchSummaryToken++;
+    };
+  });
+
   function handleCardClick(e, run) {
     if (e.target.closest("button, a, input, select")) return;
+    if (e.target.closest(".run-details-panel")) return;
     if (window.getSelection()?.toString()) return;
-    openRunDetail(run.name, run.id);
+    if (onRunSelect) onRunSelect(run);
+    else openRunDetail(run.name, run.id);
   }
 
   let orderedRuns = $derived.by(() => {
@@ -210,10 +296,21 @@
 
   let liveCount = $derived(orderedRuns.filter((r) => runState(r) === "training").length);
   let awaitingCount = $derived(orderedRuns.filter((r) => !r.last_timestamp).length);
-  let visibleRuns = $derived(orderedRuns.filter((run) =>
-    run.name.toLowerCase().includes(query.trim().toLowerCase()) &&
-    (filter === "all" || (filter === "recent" ? runState(run) === "training" : !run.last_timestamp)),
-  ));
+  let visibleRuns = $derived(orderedRuns.filter((run) => {
+    const normalizedQuery = query.trim().toLowerCase();
+    const summary = searchableSummaries[runKey(run)];
+    const config = runConfigs[runKey(run)] ?? runConfigs[run.name];
+    const metricsText = Object.entries(run.metrics || {})
+      .flatMap(([name, value]) => [name, ...Object.values(value || {})])
+      .join(" ");
+    const matchesSearch = !normalizedQuery ||
+      `${run.name} ${metricsText} ${summary?.num_logs ?? ""} ${summary?.last_step ?? ""} ${summary?.metrics?.join(" ") ?? ""} ${configSearchText(summary?.config ?? config)}`
+        .toLowerCase()
+        .includes(normalizedQuery);
+    const matchesFilter = filter === "all" ||
+      (filter === "recent" ? runState(run) === "training" : !run.last_timestamp);
+    return matchesSearch && matchesFilter;
+  }));
   let successAge = $derived(lastSuccess == null ? null : Math.max(0, (nowMs - lastSuccess) / 1000));
   let stale = $derived(!snapshot && successAge != null && successAge > 15);
 
@@ -225,15 +322,9 @@
     description={project ? `Recent activity for runs in ${project}.` : "Select a project to see run activity."}
     count={statusRuns ? statusRuns.length : null}
   />
-  <div class="overview-context">
-    <div class="context-project">
-      <span class="context-label">RUNS IN PROJECT</span>
-      <strong>{project || "No project selected"}</strong>
-    </div>
-    {#if project}
-      <button class="view-runs-button" onclick={() => navigateTo("runs")}>View runs table <span aria-hidden="true">→</span></button>
-    {/if}
-  </div>
+  {#if project}
+    <ProjectRunGuides {project} collapsible={true} />
+  {/if}
   <div class="sync-bar">
     <div class="sync-info" role="status">
       <span class="sync-dot" class:warning={failed || stale}></span>
@@ -269,12 +360,17 @@
       <div class="summary-item"><span>Awaiting logs</span><strong>{awaitingCount}</strong><small>No metrics received yet</small></div>
     </div>
     <div class="runs-toolbar">
-      <label class="search-field"><span class="sr-only">Search runs</span><input type="search" placeholder="Search runs…" bind:value={query} /></label>
-      <label class="filter-field"><span class="sr-only">Filter activity</span><select bind:value={filter}>
-        <option value="all">All activity</option>
-        {#if !snapshot}<option value="recent">Recent logs</option>{/if}
-        <option value="awaiting">Awaiting logs</option>
-      </select></label>
+      <label class="search-field"><span class="sr-only">Search runs, metrics, and configuration</span><input type="search" placeholder="Search runs, metrics, config…" bind:value={query} /></label>
+      <div class="activity-toggle" role="group" aria-label="Filter activity">
+        <button class:active={filter === "all"} aria-pressed={filter === "all"} onclick={() => { filter = "all"; }}>All activity</button>
+        {#if !snapshot}
+          <button class:active={filter === "recent"} aria-pressed={filter === "recent"} onclick={() => { filter = "recent"; }}>Recent activity</button>
+        {/if}
+        <button class:active={filter === "awaiting"} aria-pressed={filter === "awaiting"} onclick={() => { filter = "awaiting"; }}>Awaiting logs</button>
+      </div>
+      {#if searchSummaryLoading}
+        <span class="searching-details" role="status">Searching run details…</span>
+      {/if}
       <span class="result-count">{visibleRuns.length} of {orderedRuns.length} runs</span>
     </div>
     <p class="activity-note">{snapshot ? "Saved metric values" : "Activity reflects received logs, not process health"}. Metrics and changes use the latest {tailRows} log entries per run.</p>
@@ -289,6 +385,7 @@
         {@const rate = stepsPerMin(run)}
         {@const others = otherMetrics(run)}
         {@const expanded = !!expandedRuns[runKey(run)]}
+        {@const detailsOpen = !!detailsOpenRuns[runKey(run)]}
         <!-- svelte-ignore a11y_no_noninteractive_element_interactions, a11y_click_events_have_key_events -->
         <article
           class="status-card"
@@ -298,7 +395,7 @@
           <div class="status-line">
             <div class="status-name">
               <span class="run-dot" style:background={runColorMap[runKey(run)] ?? "var(--body-text-color-subdued)"}></span>
-              <button class="run-link" title={run.name} onclick={() => openRunDetail(run.name, run.id)}>{run.name}</button>
+              <button class="run-link" title={run.name} onclick={() => onRunSelect ? onRunSelect(run) : openRunDetail(run.name, run.id)}>{run.name}</button>
               <span class="state-badge state-{state}">
                 {#if state === "training"}<span class="pulse-dot"></span>{/if}
                 {STATE_LABELS[state]}
@@ -362,6 +459,25 @@
               {/if}
             </div>
           {/if}
+          <div class="run-details-toggle-row">
+            <button
+              class="run-details-toggle"
+              aria-expanded={detailsOpen}
+              onclick={() => toggleRunDetails(run)}
+            >
+              {detailsOpen ? "Hide details" : "Details"}
+              <span aria-hidden="true">{detailsOpen ? "−" : "+"}</span>
+            </button>
+          </div>
+          {#if detailsOpen}
+            <div class="run-details-panel">
+              <RunSummaryHeader
+                {project}
+                run={run}
+                config={runConfigs[runKey(run)] ?? runConfigs[run.name]}
+              />
+            </div>
+          {/if}
         </article>
       {/each}
     </div>
@@ -371,18 +487,14 @@
 <style>
   .overview-page {
     min-width: 0;
+    min-height: 0;
     box-sizing: border-box;
     padding: 28px;
     overflow-y: auto;
+    overflow-x: hidden;
     flex: 1;
   }
   .sync-bar, .sync-info, .runs-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-  .overview-context { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 18px; padding: 14px 16px; border: 1px solid var(--border-color-primary); border-radius: var(--radius-xl); background: var(--background-fill-primary); }
-  .context-project { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-  .context-label { color: var(--body-text-color-subdued); font-size: 10px; font-weight: 600; letter-spacing: .06em; }
-  .context-project strong { overflow: hidden; color: var(--body-text-color); font-size: 14px; font-weight: 600; text-overflow: ellipsis; }
-  .view-runs-button { display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0; border: 1px solid var(--border-color-primary); border-radius: var(--radius-lg); padding: 8px 12px; background: var(--background-fill-secondary); color: var(--body-text-color); font: inherit; font-size: 12px; cursor: pointer; }
-  .view-runs-button:hover { border-color: var(--primary-400); color: var(--primary-700); }
   .sync-bar { justify-content: space-between; margin-bottom: 20px; }
   .sync-info { gap: 8px; font-size: 12px; color: var(--body-text-color); }
   .sync-time, .result-count, .activity-note { color: var(--body-text-color-subdued); font-size: 12px; }
@@ -400,17 +512,26 @@
   .summary-item small { font-size: 11px; color: var(--body-text-color-subdued); line-height: 1.5; }
   .runs-toolbar { gap: 10px; }
   .search-field { flex: 1; min-width: 160px; max-width: 340px; }
-  .search-field input, .filter-field select { width: 100%; box-sizing: border-box; border: 1px solid var(--border-color-primary); border-radius: var(--radius-lg); padding: 10px 12px; background: var(--background-fill-primary); color: var(--body-text-color); font: inherit; font-size: 13px; }
+  .search-field input { width: 100%; box-sizing: border-box; border: 1px solid var(--border-color-primary); border-radius: var(--radius-lg); padding: 10px 12px; background: var(--background-fill-primary); color: var(--body-text-color); font: inherit; font-size: 13px; }
   .search-field input::placeholder { color: var(--body-text-color-subdued); }
+  .activity-toggle { display: inline-flex; align-items: center; gap: 2px; padding: 3px; border: 1px solid var(--border-color-primary); border-radius: var(--radius-lg); background: var(--background-fill-secondary); }
+  .activity-toggle button { border: 0; border-radius: calc(var(--radius-lg) - 3px); padding: 7px 10px; background: transparent; color: var(--body-text-color-subdued); font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }
+  .activity-toggle button:hover { color: var(--body-text-color); }
+  .activity-toggle button.active { background: var(--background-fill-primary); color: var(--body-text-color); box-shadow: var(--shadow-drop); }
   .result-count { margin-left: auto; }
+  .searching-details { color: var(--body-text-color-subdued); font-size: 11px; }
   .activity-note { margin: 12px 0 18px; line-height: 1.6; }
   .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
-  button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 3px; }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 3px; }
   .status-list {
     display: flex;
     flex-direction: column;
     gap: 16px;
   }
+  .run-details-toggle-row { display: flex; justify-content: flex-end; margin-top: 12px; }
+  .run-details-toggle { display: inline-flex; align-items: center; gap: 7px; padding: 4px 2px; border: 0; background: transparent; color: var(--body-text-color-subdued); font: inherit; font-size: 12px; cursor: pointer; }
+  .run-details-toggle:hover { color: var(--body-text-color); }
+  .status-card :global(.run-summary-card) { margin: 12px 0 0; box-shadow: none; }
   .status-card {
     border: 1px solid var(--border-color-primary);
     box-shadow: var(--shadow-drop);
@@ -660,7 +781,6 @@
     .result-count { flex-basis: 100%; }
     .chip-name { max-width: 150px; }
     .sync-time { flex-basis: 100%; margin-left: 15px; }
-    .overview-context { align-items: flex-start; }
     .big-step { padding-left: 0; border-left: none; align-items: flex-start; }
   }
   @media (prefers-reduced-motion: reduce) { .pulse-dot { animation: none; } .status-card { transition: none; } }

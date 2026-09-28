@@ -151,7 +151,6 @@
     "traces",
     "media",
     "reports",
-    "runs",
     "files",
     "artifacts",
   ];
@@ -185,10 +184,29 @@
     runs.filter((run) => selectedRuns.includes(runKey(run))),
   );
 
+  $effect(() => {
+    if (currentPage !== "run-detail" || !runs.length) return;
+    urlTick;
+    const selectedId = getQueryParam("selected_run_id");
+    const selectedName = getQueryParam("selected_run");
+    const detailRun = runs.find((run) =>
+      selectedId
+        ? String(runKey(run)) === selectedId
+        : run.name === selectedName,
+    );
+    if (detailRun) selectedRuns = [runKey(detailRun)];
+  });
+
   function handleNavigate(page) {
     openedFirstNonEmptyTab = true;
     currentPage = page;
     navigateTo(page);
+  }
+
+  function openOverviewRunInMetrics(run) {
+    selectedRuns = [runKey(run)];
+    currentPage = "metrics";
+    navigateTo("metrics");
   }
 
   function isBareDashboardPath() {
@@ -459,6 +477,7 @@
     currentPage = getPageFromPath();
 
     window.addEventListener("popstate", () => {
+      openedFirstNonEmptyTab = true;
       currentPage = getPageFromPath();
       urlTick++;
       applyLockedProject();
@@ -695,7 +714,12 @@
 
     <div class="page-content">
       {#if currentPage === "overview"}
-        <Overview project={selectedProject} {runs} />
+        <Overview
+          project={selectedProject}
+          {runs}
+          {runConfigs}
+          onRunSelect={openOverviewRunInMetrics}
+        />
       {:else if currentPage === "metrics"}
         <Metrics
           project={selectedProject}
@@ -778,6 +802,8 @@
   }
 
   :global(body) {
+    height: 100%;
+    overflow: hidden;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
       "Helvetica Neue", Arial, sans-serif;
     background: var(--background-fill-primary, #fff);
@@ -786,9 +812,18 @@
     -webkit-font-smoothing: antialiased;
   }
 
+  :global(html),
+  :global(#app) {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+  }
+
   .app {
     display: flex;
     height: 100vh;
+    height: 100dvh;
+    min-height: 0;
     overflow: hidden;
   }
 
