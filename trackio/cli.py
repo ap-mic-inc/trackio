@@ -3,6 +3,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -10,7 +11,7 @@ import huggingface_hub
 from huggingface_hub.utils import get_session
 
 import trackio
-from trackio import agent_import, freeze, show, sync
+from trackio import agent_hooks, agent_import, freeze, show, sync
 from trackio import logbook as lb
 from trackio.build_info import version_string
 from trackio.cli_helpers import (
@@ -1431,6 +1432,42 @@ def main():
         help="Output in JSON format",
     )
 
+    hooks_parser = subparsers.add_parser(
+        "hooks",
+        help="Collect Claude Code and Codex sessions as traces automatically",
+    )
+    hooks_subparsers = hooks_parser.add_subparsers(dest="hooks_action", required=True)
+    for action, action_help in (
+        ("install", "Install or update the session-import hooks"),
+        ("uninstall", "Remove the session-import hooks"),
+    ):
+        action_parser = hooks_subparsers.add_parser(action, help=action_help)
+        action_parser.add_argument("--claude", action="store_true", help="Claude Code")
+        action_parser.add_argument("--codex", action="store_true", help="Codex")
+        action_parser.add_argument(
+            "--global",
+            dest="global_",
+            action="store_true",
+            help=(
+                "Use the user-level settings, so every repository is traced "
+                "(each into a project named after its folder)"
+            ),
+        )
+        action_parser.add_argument(
+            "--dir",
+            help="Repository to install into (default: the current git repository)",
+        )
+        action_parser.add_argument(
+            "--dry-run",
+            action="store_true",
+            help="Show the resulting settings without writing them",
+        )
+        if action == "install":
+            action_parser.add_argument(
+                "--project",
+                help="Project for the traces (default: the repository folder name)",
+            )
+
     import_parser = subparsers.add_parser(
         "import", help="Import external data into a Trackio project"
     )
@@ -2500,6 +2537,8 @@ def main():
     elif args.command == "query":
         if args.query_type == "project":
             _handle_query(args)
+    elif args.command == "hooks":
+        _handle_hooks(args)
     elif args.command == "import":
         if args.import_type == "agent-session":
             _handle_import_agent_session(args)
@@ -2579,6 +2618,90 @@ def _read_logbook_payload(path_or_text, inline_text):
     if path.is_file():
         return path.read_text(encoding="utf-8")
     return path_or_text
+
+
+def _hooks_root(directory: str | None) -> Path:
+    if directory:
+        return Path(directory).expanduser().resolve()
+    try:
+        top = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        if top:
+            return Path(top)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return Path.cwd()
+
+
+def _handle_hooks(args):
+    agents = [agent for agent in agent_hooks.AGENTS if getattr(args, agent)]
+    if not agents:
+        agents = [
+            agent
+            for agent in agent_hooks.AGENTS
+            if Path(f"~/.{agent}").expanduser().is_dir()
+        ]
+        if not agents:
+            error_exit("Pass --claude and/or --codex.")
+    root = _hooks_root(args.dir)
+    names = {"claude": "Claude Code", "codex": "Codex"}
+    for agent in agents:
+        try:
+            if args.hooks_action == "install":
+                path, settings, changed = agent_hooks.install(
+                    agent,
+                    root=root,
+                    global_=args.global_,
+                    project=args.project,
+                    dry_run=args.dry_run,
+                )
+            else:
+                path, changed = agent_hooks.uninstall(
+                    agent, root=root, global_=args.global_, dry_run=args.dry_run
+                )
+                settings = None
+        except agent_hooks.HookInstallError as e:
+            error_exit(str(e))
+        if args.dry_run:
+            print(f"# {names[agent]}: {path}")
+            if settings is not None:
+                print(json.dumps(settings, indent=2))
+            elif changed:
+                print("(Trackio hooks would be removed)")
+            else:
+                print("(no Trackio hooks installed)")
+            continue
+        if args.hooks_action == "uninstall":
+            state = "Removed" if changed else "No Trackio hooks in"
+            print(f"{state} {names[agent]} hooks: {path}")
+            continue
+        state = "Installed" if changed else "Already up to date:"
+        print(f"{state} {names[agent]} hooks: {path}")
+        project = args.project or (
+            "the repository folder name" if args.global_ else f"'{root.name}'"
+        )
+        print(f"  Every turn is imported as a trace into project {project}.")
+        if agent == "claude":
+            print("  Takes effect in new Claude Code sessions.")
+        else:
+            print(
+                "  Codex asks you to review new hooks: run /hooks in Codex"
+                + ("." if args.global_ else ", and trust this project.")
+            )
+            if not args.global_:
+                print(
+                    "  The hook uses this machine's trackio path; keep "
+                    ".codex/hooks.json out of version control."
+                )
+    if args.hooks_action == "install" and not args.dry_run:
+        print(
+            "Traces go to the local database, or to TRACKIO_SERVER_URL when it is set "
+            "in the agent's environment."
+        )
 
 
 def _handle_import_agent_session(args):

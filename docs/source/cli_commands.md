@@ -450,6 +450,40 @@ Output in JSON format:
 trackio get report --project "my-project" --run "my-run" --report "training_report" --json
 ```
 
+## Import Command
+
+### Import a Coding-Agent Session
+
+Import a Claude Code or Codex session transcript as traces, one per turn:
+
+```sh
+trackio import agent-session ~/.claude/projects/<dir>/<session-id>.jsonl --project my-repo
+```
+
+Options:
+
+- `--project`: Target project. Defaults to the name of the session's working directory.
+- `--group`: Run group. Defaults to `claude-code` or `codex`.
+- `--hook`: Read a Claude Code or Codex hook payload from stdin instead of a path, import the last turns, and always exit 0.
+- `--last N`: Only import the last N turns (the default with `--hook` is 2).
+- `--all`: Import every turn, also with `--hook`.
+- `--no-scrub`: Keep secrets instead of redacting them.
+- `--server-url`, `--space`: Send to a self-hosted server or a Space instead of the local database.
+
+### Install the Session-Import Hooks
+
+Collect every Claude Code or Codex turn automatically:
+
+```sh
+trackio hooks install --claude --codex --project my-repo
+trackio hooks uninstall --claude --codex
+```
+
+Options: `--global` (user-level settings, every repository is traced), `--dir`
+(repository to install into; defaults to the current git repository),
+`--project` (install only), and `--dry-run`. See
+[Traces](traces#import-coding-agent-sessions-claude-code-codex) for details.
+
 ## Query Command
 
 Use `trackio query` when you need a catch-all read-only SQL query that is not already covered by `trackio list` or `trackio get`.

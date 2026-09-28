@@ -301,7 +301,7 @@ export function tracesGuide(project) {
     eyebrow: "LLM APPS & AGENTS",
     title: "Traces",
     badge: "PYTHON",
-    summary: "View code for logging conversations, tool calls, and spans",
+    summary: "View code for logging conversations, tool calls, spans, and coding-agent sessions",
     description: `Log a <code>trackio.Trace</code> with OpenAI-style messages to
       inspect requests, tool calls, latency, tokens, and cost on this page.`,
     items: [
@@ -372,6 +372,65 @@ trackio.finish()`,
         hint: `Spans build the operation tree; <code>kind</code> is <code>span</code>,
           <code>generation</code>, or <code>tool</code>, and timing, usage, and cost
           roll up into the trace totals.`,
+      },
+      {
+        id: "claude-code",
+        label: "Claude Code",
+        badge: "BASH",
+        code: `# In the repository you want to trace
+trackio hooks install --claude --project ${p}
+
+# Or trace every repository, each into a project named after its folder
+trackio hooks install --claude --global
+
+# Import a past session by hand
+trackio import agent-session ~/.claude/projects/<dir>/<session-id>.jsonl --project ${p}`,
+        hint: `<ul>
+          <li><strong>One trace per turn.</strong> Each Claude Code session becomes a
+            run and every prompt becomes a trace at <code>step</code> = turn, with model
+            calls and tool calls as spans and <code>agent/*</code> metrics per turn.</li>
+          <li><strong>What it changes.</strong> Adds a <code>Stop</code> and a
+            <code>SessionEnd</code> hook to <code>.claude/settings.local.json</code>
+            (personal, not committed; <code>~/.claude/settings.json</code> with
+            <code>--global</code>) and leaves your other settings alone. Re-run it to
+            update, <code>trackio hooks uninstall --claude</code> to remove, and add
+            <code>--dry-run</code> to preview.</li>
+          <li><strong>Works in scripts too.</strong> The hook imports the finished turn
+            before Claude Code exits (about a second per turn), so <code>claude -p</code>
+            runs are captured as well. Re-imports update turns in place.</li>
+          <li><strong>Where it goes.</strong> The local database by default, or the
+            server in <code>TRACKIO_SERVER_URL</code> with <code>TRACKIO_WRITE_TOKEN</code>
+            when they are set in Claude Code's environment. Common secrets are
+            redacted; prompts, file contents, and command output are still included,
+            so only enable this where you want sessions recorded.</li>
+        </ul>`,
+      },
+      {
+        id: "codex",
+        label: "Codex",
+        badge: "BASH",
+        code: `# In the repository you want to trace
+trackio hooks install --codex --project ${p}
+
+# Or trace every repository, each into a project named after its folder
+trackio hooks install --codex --global
+
+# Import a past session by hand
+trackio import agent-session ~/.codex/sessions/YYYY/MM/DD/rollout-<id>.jsonl --project ${p}`,
+        hint: `<ul>
+          <li><strong>Same layout as Claude Code:</strong> one run per session, one
+            trace per turn, with Codex's own turn durations and token usage.</li>
+          <li><strong>What it changes.</strong> Adds a <code>Stop</code> hook to
+            <code>.codex/hooks.json</code> (<code>~/.codex/hooks.json</code> with
+            <code>--global</code>). The hook points at this machine's
+            <code>trackio</code>, so keep the repository file out of version control.
+            Remove it with <code>trackio hooks uninstall --codex</code>.</li>
+          <li><strong>Approve it in Codex.</strong> Codex asks you to review new hooks
+            with <code>/hooks</code>, and only loads a repository's hooks once the
+            project is trusted.</li>
+          <li><strong>No session-end hook.</strong> Codex imports the last turns after
+            every reply; if a session was cut short, import its file by hand.</li>
+        </ul>`,
       },
     ],
   };

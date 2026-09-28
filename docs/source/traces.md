@@ -108,6 +108,118 @@ operation failed when the message sets `is_error`, `error`, or an error `status`
 OpenAI-style tool results carry no success signal, so those operations are left
 without a status rather than assumed successful.
 
+## Import coding-agent sessions (Claude Code, Codex)
+
+`trackio import agent-session` turns a Claude Code or Codex session transcript into
+traces, so you can review what a coding agent did turn by turn:
+
+- the session becomes one run (grouped as `claude-code` or `codex`);
+- every turn — one prompt and everything the agent did until it replied — becomes
+  one trace at `step` = turn number, with the prompt and final reply as messages,
+  one `generation` span per model call (model and token usage), and one `tool`
+  span per tool call (input, output, and whether it failed);
+- per-turn counters are logged as metrics: `agent/tool_calls`, `agent/tool_errors`,
+  `agent/model_calls`, `agent/input_tokens`, `agent/cached_input_tokens`,
+  `agent/output_tokens`, and `agent/duration_s`.
+
+Import a transcript by hand:
+
+```sh
+trackio import agent-session ~/.claude/projects/<dir>/<session-id>.jsonl --project my-repo
+trackio import agent-session ~/.codex/sessions/2026/09/28/rollout-<id>.jsonl --project my-repo
+```
+
+The project defaults to the name of the session's working directory. Imports are
+idempotent: run and log ids are derived from the session id, and re-importing a
+session updates its turns in place, so it is safe to import the same file after
+every turn. Common secrets are redacted before anything is stored (pass
+`--no-scrub` to keep the transcript as is); prompts, file contents, and command
+output are still included, so only import sessions you want recorded.
+
+### Collect every turn automatically
+
+Install the hooks from the repository you want to trace:
+
+```sh
+trackio hooks install --claude --project my-repo   # Claude Code
+trackio hooks install --codex --project my-repo    # Codex
+```
+
+Claude Code hooks go to `.claude/settings.local.json` (personal, not committed)
+and Codex hooks to `.codex/hooks.json`; `--global` installs them in
+`~/.claude/settings.json` or `~/.codex/hooks.json` instead, so every repository
+is traced into a project named after its folder. The command merges into
+existing settings without touching other hooks, points the hook at the
+`trackio` executable it was run from, and is safe to re-run. Preview with
+`--dry-run`, and remove the hooks with `trackio hooks uninstall --claude` or
+`--codex`. Codex asks you to review new hooks with `/hooks` and only loads a
+repository's hooks once the project is trusted.
+
+When a turn ends, the agent runs `trackio import agent-session --hook` with the
+transcript path on stdin. It imports the latest turns (`--all` for the whole
+session), fills in the final reply from the payload when the transcript has not
+caught up yet, and never fails the agent: errors are printed to stderr and the
+command exits 0. The Stop hook runs synchronously (about a second per turn)
+because headless runs such as `claude -p` exit as soon as the reply is printed,
+which would kill a background hook.
+
+To add the hooks by hand instead, Claude Code in `.claude/settings.local.json`:
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "trackio import agent-session --hook --project my-repo",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "trackio import agent-session --hook --all --project my-repo",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+and Codex in `.codex/hooks.json`:
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "trackio import agent-session --hook --project my-repo",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Imports go to the local database by default. Set `TRACKIO_SERVER_URL` and
+`TRACKIO_WRITE_TOKEN` (or pass `--server-url`) to send them to a self-hosted
+server, or `TRACKIO_SPACE_ID` (or `--space`) for a Space. If `trackio` is installed
+in a virtualenv, use the absolute path to its `trackio` executable in `command`
+(`trackio hooks install` does this for you).
+
 ## Inspect traces from the CLI
 
 The dashboard is not the only way to read traces back. The CLI works against

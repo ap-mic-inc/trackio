@@ -35,6 +35,10 @@
   let traces = $state([]);
   let availableSteps = $state([]);
   let totalCount = $state(0);
+  let summaryLoaded = $state(false);
+  let quickstartOpen = $state(false);
+  let quickstartTab = $state(null);
+  let quickstartEl = $state(null);
   let loadRequestId = 0;
   let summaryRequestId = 0;
 
@@ -90,11 +94,18 @@
     });
   }
 
+  function openQuickstart(id) {
+    quickstartTab = id;
+    quickstartOpen = true;
+    quickstartEl?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
   async function loadSummary() {
     const requestId = ++summaryRequestId;
     if (!project || selectedRuns.length === 0) {
       availableSteps = [];
       totalCount = 0;
+      summaryLoaded = false;
       return;
     }
     try {
@@ -114,11 +125,13 @@
         .map(([step, count]) => ({ step, count }))
         .sort((a, b) => (a.step ?? 0) - (b.step ?? 0));
       totalCount = total;
+      summaryLoaded = true;
     } catch (error) {
       if (requestId !== summaryRequestId) return;
       console.error("Failed to load trace summary:", error);
       availableSteps = [];
       totalCount = 0;
+      summaryLoaded = false;
     }
   }
 
@@ -418,7 +431,14 @@
 <div class="traces-page workspace-page">
   <PageHeader title="Traces" description="Inspect requests, timing, and individual operations." />
   {#if project}
-    <Quickstart guide={tracesGuide(project)} collapsible={true} />
+    <div bind:this={quickstartEl}>
+      <Quickstart
+        guide={tracesGuide(project)}
+        collapsible={true}
+        bind:open={quickstartOpen}
+        bind:selectedId={quickstartTab}
+      />
+    </div>
   {/if}
   {#if !project}
     <div class="empty-state">
@@ -460,6 +480,20 @@
 
     {#if loading && traces.length === 0}
       <LoadingTrackio />
+    {:else if traces.length === 0 && summaryLoaded && totalCount === 0}
+      <div class="empty-state">
+        <h2>No traces yet</h2>
+        <p>
+          Log a <code>trackio.Trace</code> from your LLM app or agent, or collect
+          Claude Code and Codex sessions automatically with a hook: every turn
+          becomes a trace with its model and tool calls.
+        </p>
+        <div class="trace-start-actions">
+          {#each [["chat", "Log from Python"], ["claude-code", "Collect Claude Code sessions"], ["codex", "Collect Codex sessions"]] as [id, label]}
+            <button type="button" class="trace-start-action" onclick={() => openQuickstart(id)}>{label}</button>
+          {/each}
+        </div>
+      </div>
     {:else if traces.length === 0}
       <div class="empty-state">
         <h2>No traces match the current filters</h2>
@@ -768,6 +802,27 @@
     color: var(--body-text-color-subdued, #6b7280);
     font-size: 13px;
     white-space: nowrap;
+  }
+  .trace-start-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 8px;
+    margin-top: 16px;
+  }
+  .trace-start-action {
+    padding: 7px 12px;
+    border: 1px solid var(--border-color-primary, #e5e7eb);
+    border-radius: var(--radius-md, 6px);
+    background: var(--background-fill-primary, white);
+    color: var(--body-text-color, #1f2937);
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .trace-start-action:hover {
+    border-color: var(--color-accent, #f97316);
+    color: var(--color-accent, #f97316);
   }
   .count {
     margin-left: auto;
