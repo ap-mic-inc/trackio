@@ -67,6 +67,29 @@ or with `uv`:
 uv pip install trackio
 ```
 
+### Installing the ap-mic-inc fork
+
+Features added in this fork (coding-agent traces and `trackio hooks`, alert
+dismissal, multi-node system metrics, per-page Quickstarts, build revisions, and
+dashboard fixes) are not in the PyPI release. Install the fork from GitHub,
+replacing `main` with a branch or tag if you need one:
+
+```bash
+pip install "trackio @ git+https://github.com/ap-mic-inc/trackio@main"
+```
+
+Installing from git builds the dashboard, so [Node.js](https://nodejs.org/) and
+`npm` must be available (set `SKIP_FRONTEND_BUILD=1` only if you provide
+`trackio/frontend/dist/` yourself). Use the fork both where you log (training
+jobs, Claude Code or Codex) and where you run the dashboard: the server side is
+what stores re-imported agent turns in place, lists monitoring-only nodes, and
+serves the updated UI.
+
+`trackio --version` prints the version with the source revision, e.g.
+`trackio 0.39.0 (9945ca9)`, or `(9945ca9+3f2a1c)` for uncommitted changes. The
+dashboard shows the same revision under the logo, so you can check that a
+running server has picked up your changes.
+
 ## Usage
 
 To get started, you can run a simple example that logs some fake training metrics:
@@ -292,6 +315,36 @@ trackio.finish()
 ```
 
 You can query alerts via the CLI (`trackio get alerts --project "my-project" --json`), the Python API (`trackio.Api().alerts("my-project")`), or the HTTP endpoint (`/get_alerts`). For full details, see the [Alerts guide](https://huggingface.co/docs/trackio/alerts) and the [ML Agents guide](https://huggingface.co/docs/trackio/ml_agents).
+
+## Coding-agent traces (Claude Code, Codex)
+
+Record every Claude Code or Codex turn as a trace: each session becomes a run,
+and each prompt becomes a trace at `step` = turn, with the reply, every model call
+(model and token usage), and every tool call (input, output, and whether it
+failed), plus `agent/*` metrics per turn. Install the hooks from the repository
+you want to trace:
+
+```bash
+trackio hooks install --claude --project my-repo   # Claude Code
+trackio hooks install --codex --project my-repo    # Codex
+trackio hooks install --claude --global            # every repository, one project each
+trackio hooks uninstall --claude                   # remove
+```
+
+The command merges Trackio's hook into the agent's settings
+(`.claude/settings.local.json` or `.codex/hooks.json`) without touching anything
+else, and is safe to re-run. Turns go to the local database, or to your server
+when `TRACKIO_SERVER_URL` and `TRACKIO_WRITE_TOKEN` are set in the agent's
+environment. Past sessions can be imported by hand:
+
+```bash
+trackio import agent-session ~/.claude/projects/<dir>/<session-id>.jsonl --project my-repo
+```
+
+Common secrets are redacted, but prompts, file contents, and command output are
+kept, so only enable the hooks where you want sessions recorded. See the
+[Traces guide](docs/source/traces.md#import-coding-agent-sessions-claude-code-codex)
+for details.
 
 ## Examples
 
