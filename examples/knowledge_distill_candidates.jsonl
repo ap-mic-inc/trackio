@@ -1,0 +1,4 @@
+{"id":"a1","question":"What is Trackio?","text":"Trackio is a local-first experiment tracking library for recording metrics and artifacts.","source":"docs/track.md","confidence":0.98}
+{"id":"a2","question":"Short item","text":"Too short","source":"docs/track.md","confidence":0.98}
+{"id":"a3","question":"Duplicate","text":"Trackio is a local-first experiment tracking library for recording metrics and artifacts.","source":"docs/track.md","confidence":0.97}
+{"id":"a4","question":"Uncertain","text":"This statement needs a human reviewer because the source is unclear.","source":"unknown","confidence":0.42}
