@@ -606,7 +606,8 @@ class SQLiteStorage:
                         text TEXT,
                         level TEXT NOT NULL DEFAULT 'warn',
                         step INTEGER,
-                        alert_id TEXT
+                        alert_id TEXT,
+                        dismissed_at TEXT
                     )
                     """
                 )
@@ -808,6 +809,10 @@ class SQLiteStorage:
                     ON alerts(alert_id) WHERE alert_id IS NOT NULL
                     """
                 )
+                try:
+                    cursor.execute("ALTER TABLE alerts ADD COLUMN dismissed_at TEXT")
+                except sqlite3.OperationalError:
+                    pass
 
                 for table in ("metrics", "system_metrics"):
                     for col in ("log_id TEXT", "space_id TEXT"):
@@ -2165,8 +2170,14 @@ class SQLiteStorage:
         with SQLiteStorage._get_connection(db_path) as conn:
             cursor = conn.cursor()
             try:
+                dismissed_col = (
+                    "dismissed_at"
+                    if "dismissed_at" in SQLiteStorage._table_columns(conn, "alerts")
+                    else "NULL AS dismissed_at"
+                )
                 query = (
-                    "SELECT timestamp, run_name, title, text, level, step FROM alerts"
+                    "SELECT rowid AS id, timestamp, run_name, title, text, level, "
+                    f"step, {dismissed_col} FROM alerts"
                 )
                 conditions = []
                 params = []
@@ -2192,12 +2203,14 @@ class SQLiteStorage:
                 rows = cursor.fetchall()
                 return [
                     {
+                        "id": row["id"],
                         "timestamp": row["timestamp"],
                         "run": row["run_name"],
                         "title": row["title"],
                         "text": row["text"],
                         "level": row["level"],
                         "step": row["step"],
+                        "dismissed_at": row["dismissed_at"],
                     }
                     for row in rows
                 ]
@@ -2205,6 +2218,29 @@ class SQLiteStorage:
                 if "no such table: alerts" in str(e):
                     return []
                 raise
+
+    @staticmethod
+    def dismiss_alerts(project: str, ids: list[int] | None = None) -> int:
+        """Marks alerts as dismissed. Dismisses the given alert ``ids`` (as
+        returned by ``get_alerts``), or every undismissed alert in the project
+        when ``ids`` is None. Returns the number of alerts newly dismissed."""
+        if ids is not None and not ids:
+            return 0
+        if not SQLiteStorage.get_project_db_path(project).exists():
+            return 0
+        db_path = SQLiteStorage.init_db(project)
+        dismissed_at = datetime.now(timezone.utc).isoformat()
+        with SQLiteStorage._get_process_lock(project):
+            with SQLiteStorage._get_connection(db_path) as conn:
+                cursor = conn.cursor()
+                query = "UPDATE alerts SET dismissed_at = ? WHERE dismissed_at IS NULL"
+                params: list[Any] = [dismissed_at]
+                if ids is not None:
+                    query += f" AND rowid IN ({','.join('?' * len(ids))})"
+                    params.extend(int(i) for i in ids)
+                cursor.execute(query, params)
+                conn.commit()
+                return cursor.rowcount
 
     @staticmethod
     def get_alert_count(project: str) -> int:

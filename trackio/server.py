@@ -546,7 +546,7 @@ def assert_can_mutate_runs(request: Request) -> None:
         if _has_oidc_write_access(request):
             return
         raise TrackioAPIError(
-            "A write_token is required to delete or rename runs. "
+            "A write_token is required to delete or rename runs or dismiss alerts. "
             "Open the dashboard using the link that includes the write_token "
             "query parameter, or sign in via OIDC with write access."
         )
@@ -560,7 +560,7 @@ def assert_can_mutate_runs(request: Request) -> None:
     if check_write_access(request, write_token):
         return
     raise TrackioAPIError(
-        "Sign in with Hugging Face to delete or rename runs. You need write access to this Space, "
+        "Sign in with Hugging Face to delete or rename runs or dismiss alerts. You need write access to this Space, "
         "or open the dashboard using a link that includes the write_token query parameter."
     )
 
@@ -1022,6 +1022,16 @@ def get_alerts(
     return SQLiteStorage.get_alerts(
         project, run_name=run, run_id=run_id, level=level, since=since
     )
+
+
+def dismiss_alerts(
+    request: Request,
+    project: str,
+    ids: list[int] | None = None,
+) -> int:
+    assert_can_mutate_runs(request)
+    _record_write_activity(request, project, "manage")
+    return SQLiteStorage.dismiss_alerts(project, ids=ids)
 
 
 def get_metric_values(
@@ -1625,6 +1635,7 @@ def _api_registry() -> dict[str, Any]:
         "bulk_log_system": bulk_log_system,
         "bulk_alert": bulk_alert,
         "get_alerts": get_alerts,
+        "dismiss_alerts": dismiss_alerts,
         "get_metric_values": get_metric_values,
         "get_runs_for_project": get_runs_for_project,
         "get_run_configs": get_run_configs,

@@ -1,5 +1,9 @@
 <script>
-  let { alerts = [] } = $props();
+  let {
+    alerts = [],
+    dismissAccess = { visible: false, allowed: false, reason: null },
+    onDismiss = null,
+  } = $props();
 
   const BADGES = { info: "🔵", warn: "🟡", error: "🔴" };
   let expanded = $state({});
@@ -10,8 +14,13 @@
     filterLevel ? alerts.filter((a) => a.level === filterLevel) : alerts,
   );
 
-  function toggleExpand(i) {
-    expanded = { ...expanded, [i]: !expanded[i] };
+  function toggleExpand(id) {
+    expanded = { ...expanded, [id]: !expanded[id] };
+  }
+
+  function dismiss(ids) {
+    if (!dismissAccess.allowed || !onDismiss || ids.length === 0) return;
+    onDismiss(ids);
   }
 </script>
 
@@ -65,19 +74,47 @@
     </div>
     {#if !collapsed}
     <div class="alert-list">
-      {#each filtered as alert, i}
-        <div class="alert-item" class:expanded={expanded[i]}>
-          <button class="alert-row" onclick={() => toggleExpand(i)}>
-            <span>{BADGES[alert.level] || ""}</span>
-            <span class="alert-text">{alert.title}</span>
-            <span class="alert-meta">{alert.meta || ""}</span>
-          </button>
-          {#if expanded[i] && alert.text}
+      {#each filtered as alert (alert.id)}
+        <div class="alert-item" class:expanded={expanded[alert.id]}>
+          <div class="alert-line">
+            <button class="alert-row" onclick={() => toggleExpand(alert.id)}>
+              <span>{BADGES[alert.level] || ""}</span>
+              <span class="alert-text">{alert.title}</span>
+              <span class="alert-meta">{alert.meta || ""}</span>
+            </button>
+            {#if dismissAccess.visible}
+              <button
+                class="dismiss-btn"
+                title={dismissAccess.allowed ? "Dismiss" : dismissAccess.reason}
+                aria-label={`Dismiss alert: ${alert.title}`}
+                disabled={!dismissAccess.allowed}
+                onclick={() => dismiss([alert.id])}
+              >
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                  <path d="M4 4L12 12M12 4L4 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                </svg>
+              </button>
+            {/if}
+          </div>
+          {#if expanded[alert.id] && alert.text}
             <div class="alert-detail">{alert.text}</div>
           {/if}
         </div>
       {/each}
     </div>
+    {#if dismissAccess.visible && filtered.length > 0}
+      <div class="alert-footer">
+        {#if dismissAccess.allowed}
+          <button
+            class="dismiss-all"
+            onclick={() => dismiss(filtered.map((a) => a.id))}
+            >{filterLevel ? `Dismiss all ${filterLevel}` : "Dismiss all"} ({filtered.length})</button
+          >
+        {:else}
+          <span class="dismiss-hint">{dismissAccess.reason}</span>
+        {/if}
+      </div>
+    {/if}
     {/if}
   </div>
 {/if}
@@ -125,6 +162,7 @@
     transform: rotate(-90deg);
   }
   .alert-title {
+    white-space: nowrap;
     font-size: 13px;
     font-weight: 600;
     color: var(--body-text-color, #1f2937);
@@ -134,6 +172,7 @@
     gap: 4px;
   }
   .pill {
+    white-space: nowrap;
     border: 1px solid var(--border-color-primary, #e5e7eb);
     border-radius: var(--radius-xxl, 22px);
     padding: 2px 8px;
@@ -152,22 +191,77 @@
     flex: 1;
   }
   .alert-item {
-    border-bottom: 1px solid var(--neutral-100, #f3f4f6);
+    border-bottom: 1px solid var(--border-color-primary, #e5e7eb);
+  }
+  .alert-line {
+    display: flex;
+    align-items: center;
+  }
+  .alert-line:hover {
+    background: var(--background-fill-secondary, #f9fafb);
+  }
+  .dismiss-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    margin-right: 8px;
+    border: none;
+    border-radius: var(--radius-md, 6px);
+    background: none;
+    color: var(--body-text-color-subdued, #9ca3af);
+    cursor: pointer;
+  }
+  .dismiss-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.35;
+  }
+  .dismiss-btn:disabled:hover {
+    color: var(--body-text-color-subdued, #9ca3af);
+    background: none;
+  }
+  .dismiss-hint {
+    font-size: 11px;
+    color: var(--body-text-color-subdued, #6b7280);
+    text-align: right;
+  }
+  .dismiss-btn:hover {
+    color: var(--body-text-color, #1f2937);
+    background: color-mix(in srgb, var(--body-text-color, #1f2937) 8%, transparent);
+  }
+  .alert-footer {
+    display: flex;
+    justify-content: flex-end;
+    padding: 6px 12px;
+    border-top: 1px solid var(--border-color-primary, #e5e7eb);
+  }
+  .dismiss-all {
+    border: none;
+    background: none;
+    padding: 2px 4px;
+    font-size: 11px;
+    color: var(--body-text-color-subdued, #6b7280);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .dismiss-all:hover {
+    color: var(--body-text-color, #1f2937);
+    text-decoration: underline;
   }
   .alert-row {
     display: flex;
     align-items: center;
     gap: 8px;
-    width: 100%;
+    flex: 1;
+    min-width: 0;
     padding: 8px 12px;
     border: none;
     background: none;
     text-align: left;
     cursor: pointer;
     font-size: var(--text-sm, 12px);
-  }
-  .alert-row:hover {
-    background: var(--background-fill-secondary, #f9fafb);
   }
   .alert-text {
     flex: 1;

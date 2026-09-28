@@ -103,7 +103,7 @@
     }
   }
 
-  let tableHeaders = ["Level", "Run", "Title", "Text", "Step", "Time"];
+  let tableHeaders = ["Level", "Run", "Title", "Text", "Step", "Time", "Dismissed"];
   let tableRows = $derived(
     alerts.map(a => [
       `${BADGES[a.level] || ""} ${a.level}`,
@@ -112,6 +112,7 @@
       a.text || "",
       a.step ?? "",
       formatTimestamp(a.timestamp),
+      a.dismissed_at ? formatTimestamp(a.dismissed_at) : "",
     ])
   );
 </script>
@@ -184,8 +185,8 @@
               </tr>
             </thead>
             <tbody>
-              {#each tableRows as row}
-                <tr>
+              {#each tableRows as row, i}
+                <tr class:dismissed={alerts[i].dismissed_at}>
                   {#each row as cell}
                     <td>{cell}</td>
                   {/each}
@@ -265,6 +266,9 @@
   }
   .alerts-table tbody tr:nth-child(even) {
     background: var(--table-even-background-fill, var(--background-fill-secondary, #f9fafb));
+  }
+  .alerts-table tr.dismissed td {
+    color: var(--body-text-color-subdued, #9ca3af);
   }
   .alerts-table tr:hover {
     background: var(--background-fill-secondary, #f3f4f6);

@@ -170,6 +170,11 @@ export async function getAlerts(project, run, level, since) {
   return await callApi("/get_alerts", params);
 }
 
+export async function dismissAlerts(project, ids = null) {
+  if (await isStaticMode()) return staticApi.dismissAlerts(project, ids);
+  return await callApi("/dismiss_alerts", { project, ids });
+}
+
 export async function getSystemMetricsForRun(project, run) {
   const params = { project, ...normalizeRun(run) };
   if (await isStaticMode()) return staticApi.getSystemMetricsForRun(project, run);

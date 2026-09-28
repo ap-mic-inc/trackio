@@ -3,6 +3,7 @@
   import Navbar from "./components/Navbar.svelte";
   import Sidebar from "./components/Sidebar.svelte";
   import AlertPanel from "./components/AlertPanel.svelte";
+  import { alertDismissAccess } from "./lib/alertDismiss.js";
   import Metrics from "./pages/Metrics.svelte";
   import Overview from "./pages/Overview.svelte";
   import Traces from "./pages/Traces.svelte";
@@ -20,6 +21,7 @@
     getRunsForProject,
     getRunConfigs,
     getAlerts,
+    dismissAlerts,
     getTabAvailability,
     getRunMutationStatus,
     getSettings,
@@ -296,10 +298,22 @@
     if (!selectedProject) return;
     try {
       const data = await getAlerts(selectedProject, null, null, null);
-      alerts = (data || []).slice(-20);
+      alerts = (data || []).filter((a) => !a.dismissed_at).slice(0, 20);
     } catch {
       // ignore
     }
+  }
+
+  async function handleDismissAlerts(ids) {
+    if (!selectedProject) return;
+    const dismissed = new Set(ids);
+    alerts = alerts.filter((a) => !dismissed.has(a.id));
+    try {
+      await dismissAlerts(selectedProject, ids);
+    } catch (e) {
+      console.error("Failed to dismiss alerts:", e);
+    }
+    await refreshAlerts();
   }
 
   function initialAvailability() {
@@ -791,7 +805,11 @@
     </div>
   </div>
 
-  <AlertPanel {alerts} />
+  <AlertPanel
+    {alerts}
+    dismissAccess={alertDismissAccess(mutationStatus)}
+    onDismiss={handleDismissAlerts}
+  />
 </div>
 
 <style>

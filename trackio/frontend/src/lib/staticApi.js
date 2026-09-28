@@ -448,6 +448,10 @@ export async function getAlerts() {
   return [];
 }
 
+export async function dismissAlerts() {
+  throw new Error("Dismissing alerts is not supported in static mode");
+}
+
 export async function getSystemMetricsForRun(_project, run) {
   const raw = await getSystemData();
   const { rows, columns } = parseRows(raw);

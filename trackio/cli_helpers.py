@@ -267,7 +267,8 @@ def format_alerts(alerts: list[dict]) -> str:
         title = a.get("title", "")
         text = a.get("text", "") or ""
         step = a.get("step", "N/A")
-        output.append(f"{ts} | {run} | {level} | {title} | {text} | {step}")
+        dismissed = " (dismissed)" if a.get("dismissed_at") else ""
+        output.append(f"{ts} | {run} | {level} | {title}{dismissed} | {text} | {step}")
 
     return "\n".join(output)
 

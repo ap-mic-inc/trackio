@@ -657,3 +657,54 @@ def test_local_dashboard_supports_mcp(temp_dir):
     finally:
         trackio.delete_project(project, force=True)
         app.close()
+
+
+def test_dismiss_alerts(temp_dir):
+    project = "dismiss_srv"
+    SQLiteStorage.bulk_alert(
+        project=project,
+        run="r1",
+        titles=["a", "b", "c"],
+        texts=[None, None, None],
+        levels=["info", "warn", "error"],
+        steps=[1, 2, 3],
+    )
+    alerts = SQLiteStorage.get_alerts(project)
+    assert len(alerts) == 3
+    assert all(a["dismissed_at"] is None for a in alerts)
+
+    by_title = {a["title"]: a for a in alerts}
+    assert SQLiteStorage.dismiss_alerts(project, ids=[by_title["a"]["id"]]) == 1
+    assert SQLiteStorage.dismiss_alerts(project, ids=[by_title["a"]["id"]]) == 0
+    dismissed = {
+        a["title"] for a in SQLiteStorage.get_alerts(project) if a["dismissed_at"]
+    }
+    assert dismissed == {"a"}
+
+    assert SQLiteStorage.dismiss_alerts(project) == 2
+    assert all(a["dismissed_at"] for a in SQLiteStorage.get_alerts(project))
+
+    assert SQLiteStorage.dismiss_alerts(project, ids=[]) == 0
+    assert SQLiteStorage.dismiss_alerts("missing_project") == 0
+
+
+def test_dismiss_alerts_migrates_legacy_table(temp_dir):
+    import sqlite3
+
+    project = "dismiss_legacy"
+    SQLiteStorage.bulk_alert(
+        project=project,
+        run="r1",
+        titles=["a"],
+        texts=[None],
+        levels=["warn"],
+        steps=[None],
+    )
+    db_path = SQLiteStorage.get_project_db_path(project)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("ALTER TABLE alerts DROP COLUMN dismissed_at")
+
+    [alert] = SQLiteStorage.get_alerts(project)
+    assert alert["dismissed_at"] is None
+    assert SQLiteStorage.dismiss_alerts(project, ids=[alert["id"]]) == 1
+    assert SQLiteStorage.get_alerts(project)[0]["dismissed_at"] is not None
