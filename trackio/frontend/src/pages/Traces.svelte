@@ -831,6 +831,7 @@
     white-space: nowrap;
   }
   .traces-table-wrap {
+    flex-shrink: 0;
     border: 1px solid var(--border-color-primary, #e5e7eb);
     border-radius: var(--radius-lg, 8px);
     overflow-x: auto;
