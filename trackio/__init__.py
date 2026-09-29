@@ -14,7 +14,7 @@ from gradio_client import handle_file
 from huggingface_hub import SpaceStorage
 from huggingface_hub.errors import LocalTokenNotFoundError
 
-from trackio import context_vars, dataset_tracking, deploy, utils
+from trackio import context_vars, dataset_tracking, deploy, device_info, utils
 from trackio.alerts import AlertLevel
 from trackio.api import Api
 from trackio.apple_gpu import apple_gpu_available
@@ -259,6 +259,7 @@ def init(
     webhook_url: str | None = None,
     webhook_min_level: AlertLevel | str | None = None,
     track_datasets: bool | None = None,
+    log_device_info: bool | None = None,
 ) -> Run:
     """
     Creates a new Trackio project and returns a [`Run`] object.
@@ -363,6 +364,14 @@ def init(
             `datasets` library is already imported, unless the
             `TRACKIO_TRACK_DATASETS` environment variable is `0`; set that
             variable to `1` to enable it without importing `datasets` first.
+        log_device_info (`bool` or `None`, *optional*, defaults to `None`):
+            Record the machine the run executes on in the run config under
+            `_System`: hostname, OS, node rank / rank / world size (from
+            torchrun or Slurm environment variables), CPU model and memory,
+            GPU models, memory, and UUIDs with driver and CUDA versions, and
+            Python/PyTorch versions. Shown on the run page and the System
+            Metrics page, which is how multi-node runs are told apart. On by
+            default; set `False` or `TRACKIO_LOG_DEVICE_INFO=0` to skip it.
     Returns:
         `Run`: A [`Run`] object that can be used to log metrics and finish the run.
     """
@@ -647,6 +656,9 @@ def init(
         cpu_log_interval=cpu_log_interval,
         webhook_url=webhook_url,
         webhook_min_level=webhook_min_level,
+        device_info=device_info.collect()
+        if device_info.should_log(log_device_info)
+        else None,
     )
 
     if space_id is not None:

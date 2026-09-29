@@ -63,6 +63,7 @@ class Run:
         cpu_log_interval: float = 10.0,
         webhook_url: str | None = None,
         webhook_min_level: AlertLevel | str | None = None,
+        device_info: dict | None = None,
     ):
         """
         Initialize a Run for logging metrics to Trackio.
@@ -161,6 +162,8 @@ class Run:
         self.config["_Username"] = self._get_username()
         self.config["_Created"] = datetime.now(timezone.utc).isoformat()
         self.config["_Group"] = self.group
+        if device_info:
+            self.config["_System"] = utils.to_json_safe(device_info)
 
         self._queued_logs: list[LogEntry] = []
         self._queued_system_logs: list[SystemLogEntry] = []
