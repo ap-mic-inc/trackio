@@ -281,9 +281,10 @@ if local_rank == 0:
             so call <code>trackio.init()</code> only on each node's local rank 0.
             Calling it on every rank records each GPU several times; calling it
             only on global rank 0 leaves the other nodes unmonitored.</li>
-          <li><strong>Group the node runs.</strong> GPU metrics are named
-            <code>gpu/0/…</code> without a hostname, so give each node its own
-            run name and share <code>group=</code> to compare them side by side.</li>
+          <li><strong>Group the node runs.</strong> Give each node its own run
+            name and share <code>group=</code> to compare them side by side. Each
+            run records its hostname, node rank, and GPU models, so the Nodes
+            table lists the nodes and the sidebar filters GPUs per host.</li>
           <li><strong>Log training metrics once.</strong> Call
             <code>trackio.log()</code> from global rank 0 only.</li>
           <li><strong>Keep the write token stable.</strong> Start the server with a
