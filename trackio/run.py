@@ -1403,6 +1403,7 @@ class Run:
         type: str | None = None,
         aliases: list[str] | None = None,
         overwrite: bool = False,
+        as_output: bool = True,
     ) -> Artifact:
         if isinstance(artifact_or_path, Artifact):
             if name is not None or type is not None:
@@ -1443,8 +1444,8 @@ class Run:
                 manifest=manifest,
                 metadata=artifact.metadata,
                 aliases=user_aliases,
-                run_name=self.name,
-                run_id=self.id,
+                run_name=self.name if as_output else None,
+                run_id=self.id if as_output else None,
                 overwrite=overwrite,
             )
         else:
@@ -1486,8 +1487,8 @@ class Run:
                 "metadata": artifact.metadata,
                 "manifest": manifest,
                 "aliases": user_aliases,
-                "run_name": self.name,
-                "run_id": self.id,
+                "run_name": self.name if as_output else None,
+                "run_id": self.id if as_output else None,
                 "hf_token": self._hf_token_for_remote(),
             }
             if overwrite:

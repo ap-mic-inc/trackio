@@ -5485,9 +5485,10 @@ class SQLiteStorage:
                     SQLiteStorage._reassign_alias_forward_cursor(
                         conn, artifact_id, alias, version_id, version_int
                     )
-                SQLiteStorage._insert_run_artifact_link_cursor(
-                    conn, run_name, run_id, version_id, "output", now
-                )
+                if run_name is not None or run_id is not None:
+                    SQLiteStorage._insert_run_artifact_link_cursor(
+                        conn, run_name, run_id, version_id, "output", now
+                    )
                 conn.commit()
                 record = SQLiteStorage._get_artifact_manifest_cursor(
                     conn, name, f"v{version_int}"

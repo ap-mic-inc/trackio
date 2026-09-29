@@ -14,7 +14,7 @@ from gradio_client import handle_file
 from huggingface_hub import SpaceStorage
 from huggingface_hub.errors import LocalTokenNotFoundError
 
-from trackio import context_vars, deploy, utils
+from trackio import context_vars, dataset_tracking, deploy, utils
 from trackio.alerts import AlertLevel
 from trackio.api import Api
 from trackio.apple_gpu import apple_gpu_available
@@ -258,6 +258,7 @@ def init(
     cpu_log_interval: float = 10.0,
     webhook_url: str | None = None,
     webhook_min_level: AlertLevel | str | None = None,
+    track_datasets: bool | None = None,
 ) -> Run:
     """
     Creates a new Trackio project and returns a [`Run`] object.
@@ -354,6 +355,14 @@ def init(
             For example, `AlertLevel.WARN` sends only `WARN` and `ERROR`
             alerts to the webhook destination. Can also be set via
             `TRACKIO_WEBHOOK_MIN_LEVEL`.
+        track_datasets (`bool` or `None`, *optional*, defaults to `None`):
+            Record every Hugging Face Hub dataset loaded with
+            `datasets.load_dataset()` during the run as an input artifact
+            (a reference pinned to the dataset's commit, nothing is copied), so
+            it appears in the run's lineage. If `None`, this is enabled when the
+            `datasets` library is already imported, unless the
+            `TRACKIO_TRACK_DATASETS` environment variable is `0`; set that
+            variable to `1` to enable it without importing `datasets` first.
     Returns:
         `Run`: A [`Run`] object that can be used to log metrics and finish the run.
     """
@@ -667,6 +676,15 @@ def init(
 
     context_vars.current_run.set(run)
     globals()["config"] = run.config
+
+    run._track_datasets = dataset_tracking.should_track(track_datasets)
+    if run._track_datasets and not dataset_tracking.install():
+        run._track_datasets = False
+        if track_datasets:
+            _emit_nonfatal_warning(
+                "trackio.init(track_datasets=True) needs the `datasets` library; "
+                "dataset lineage is disabled for this run."
+            )
 
     # NOTE: trackio.init() deliberately does NOT mutate any logbook that happens
     # to live in the current directory. Auto-noting a dashboard cell here used to
