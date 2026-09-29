@@ -79,7 +79,7 @@ This fork adds features that are not in the PyPI release:
 | Per-project disk usage and free space | Settings → Storage |
 | Dismissing alerts | Alert panel (needs write access) |
 | Multi-node system metrics (one run per node, grouped) | System Metrics → Quickstart → Multi-node |
-| Host, node rank, GPU models, driver/CUDA recorded per run | Run page → System; System Metrics → Nodes and per-host GPU filters; [Logging from a GPU machine](#logging-from-a-gpu-machine) |
+| Host, node rank, GPU models, driver/CUDA recorded per run | Run page → System; System Metrics → Nodes and per-host GPU filters; [Running on a GPU machine](#running-everything-on-a-gpu-machine) |
 | A Quickstart on every page, including storage limits and large-data tips | Top of each page |
 | Markdown reports with tables, links, and code blocks | Alerts & Reports |
 | Source revision in `trackio --version` and under the dashboard logo | See below |
@@ -287,44 +287,56 @@ TRACKIO_WRITE_TOKEN=$(cat ~/.trackio-write-token) trackio show
 Anyone with the token can write logs, change runs, and connect MCP tools, so
 share it only with trusted users.
 
-### Logging from a GPU machine
+### Running everything on a GPU machine
 
-Training usually runs on a different machine than the dashboard. Keep one
-dashboard, and have every GPU machine (or every node of a multi-node job) log
-to it over HTTP.
+The simplest setup: install Trackio on the GPU machine, run the dashboard
+there, train there, and open the dashboard from your laptop over SSH. Nothing
+needs to be exposed on the network.
 
-**1. On the dashboard machine**, start the server with a fixed token (see
-above). It listens on `127.0.0.1` only, so either keep it that way and use an
-SSH tunnel from the GPU machine (step 2), or expose it on your network:
+**1. Requirements** on the GPU machine: Python 3.10+, `git`, the NVIDIA driver
+(`nvidia-smi` works), and Node.js 18+ with `npm`, which the install uses to
+build the dashboard. Without root, install Node.js with
+[nvm](https://github.com/nvm-sh/nvm):
 
 ```bash
-TRACKIO_WRITE_TOKEN=$(cat ~/.trackio-write-token) GRADIO_SERVER_PORT=7860 trackio show --host 0.0.0.0
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+source ~/.nvm/nvm.sh && nvm install 22
 ```
 
-Only expose it on a trusted network, and consider `TRACKIO_AUTH_REQUIRED=1` so
-reading also needs sign-in.
-
-**2. On the GPU machine**, install the fork with the GPU extra (NVML for GPU
-metrics, psutil for CPU and memory) and check that it can reach the dashboard:
+**2. Install** the fork with the GPU extra (NVML for GPU metrics, psutil for
+CPU, memory, disk, and network) into its own environment:
 
 ```bash
+python3 -m venv ~/trackio-env && source ~/trackio-env/bin/activate
 pip install "trackio[gpu] @ git+https://github.com/ap-mic-inc/trackio@feat/agent-traces-and-dashboard-fixes"
-trackio --version        # should match the revision under the dashboard logo
-nvidia-smi -L            # the GPUs Trackio will report
-
-# If the server listens on 127.0.0.1, forward it over SSH (leave this running):
-ssh -N -L 7860:127.0.0.1:7860 you@dashboard-host &
-export TRACKIO_SERVER_URL=http://127.0.0.1:7860
-# Otherwise point at it directly:
-# export TRACKIO_SERVER_URL=http://dashboard-host:7860
-export TRACKIO_WRITE_TOKEN=<token from step 1>
-
-curl -s "$TRACKIO_SERVER_URL/version"
+trackio --version    # e.g. "0.39.0 (e1c754a)": the installed commit of the branch
 ```
 
-**3. Run a short smoke test** on the GPU machine. It keeps every GPU busy for a
-minute if PyTorch is installed (otherwise it only logs a fake loss), and Trackio
-records GPU and CPU metrics every 10 seconds plus the machine description:
+The install takes about a minute, most of it building the dashboard. To update
+later, rerun the `pip install` with `--force-reinstall --no-deps` added and
+restart the dashboard.
+
+**3. Start the dashboard** with a fixed write token, in the background so it
+survives logging out (or run it inside `tmux`):
+
+```bash
+(umask 077; python -c "import secrets; print(secrets.token_urlsafe(32))" > ~/.trackio-write-token)
+TRACKIO_WRITE_TOKEN=$(cat ~/.trackio-write-token) GRADIO_SERVER_PORT=7860 \
+  nohup trackio show > ~/trackio-server.log 2>&1 &
+sleep 10 && curl -s http://127.0.0.1:7860/version   # same revision as trackio --version
+```
+
+It listens on `127.0.0.1:7860` and reads the data directory
+`~/.cache/huggingface/trackio`. To keep data elsewhere (e.g. a larger disk),
+export the same `TRACKIO_DIR` for the dashboard and for training. Stop it with
+`pkill -f "trackio show"`.
+
+**4. Train on the same machine.** Training scripts need no server URL or
+token: `trackio.init()` / `trackio.log()` write to the same data directory and
+the dashboard shows new data within a few seconds. For a first check, run this
+smoke test in the same environment. It keeps every GPU busy for a minute if
+PyTorch is installed (otherwise it only logs a fake loss), and Trackio records
+GPU and CPU metrics every 10 seconds plus the machine description:
 
 ```bash
 python - <<'PY'
@@ -353,13 +365,64 @@ trackio.finish()
 PY
 ```
 
-Then open the dashboard, pick the `gpu-smoke-test` project, and check:
+**5. Open the dashboard from your laptop** through an SSH tunnel:
 
+```bash
+ssh -N -L 7860:127.0.0.1:7860 you@gpu-host
+```
+
+Then open `http://127.0.0.1:7860/?write_token=<token>`, using the token from
+`cat ~/.trackio-write-token` on the GPU machine (the link gives write access for
+7 days; `http://127.0.0.1:7860/` alone is read-only). Pick the
+`gpu-smoke-test` project and check:
+
+- **Metrics**: the `train/loss` curve.
 - **System Metrics**: the Nodes table shows the machine's hostname and GPUs, and
   `gpu/…` charts (utilization, memory, power, temperature) appear with the GPU
   model next to each device in the sidebar.
 - **Runs → the run → System**: host, GPU list with driver and CUDA versions,
   CPU, and Python/PyTorch versions.
+
+### Logging from a GPU machine to a dashboard elsewhere
+
+To collect several machines (or every node of a multi-node job) in one
+dashboard, run the dashboard on one machine and have every GPU machine log to
+it over HTTP.
+
+**1. On the dashboard machine**, start the server with a fixed token (see
+above). It listens on `127.0.0.1` only, so either keep it that way and use an
+SSH tunnel from the GPU machine (step 2), or expose it on your network:
+
+```bash
+TRACKIO_WRITE_TOKEN=$(cat ~/.trackio-write-token) GRADIO_SERVER_PORT=7860 trackio show --host 0.0.0.0
+```
+
+Only expose it on a trusted network, and consider `TRACKIO_AUTH_REQUIRED=1` so
+reading also needs sign-in.
+
+**2. On the GPU machine**, install the fork with the GPU extra as in
+[step 2 above](#running-everything-on-a-gpu-machine) and check that it can
+reach the dashboard:
+
+```bash
+pip install "trackio[gpu] @ git+https://github.com/ap-mic-inc/trackio@feat/agent-traces-and-dashboard-fixes"
+trackio --version        # should match the revision under the dashboard logo
+nvidia-smi -L            # the GPUs Trackio will report
+
+# If the server listens on 127.0.0.1, forward it over SSH (leave this running):
+ssh -N -L 7860:127.0.0.1:7860 you@dashboard-host &
+export TRACKIO_SERVER_URL=http://127.0.0.1:7860
+# Otherwise point at it directly:
+# export TRACKIO_SERVER_URL=http://dashboard-host:7860
+export TRACKIO_WRITE_TOKEN=<token from step 1>
+
+curl -s "$TRACKIO_SERVER_URL/version"
+```
+
+**3. Run the [smoke test](#running-everything-on-a-gpu-machine)** on the GPU
+machine with those variables exported. Trackio prints `Trackio metrics will be
+sent to self-hosted server: …`; the run then appears in the dashboard with the
+same checks as above.
 
 **4. Multi-node jobs**: set the same `TRACKIO_SERVER_URL` and
 `TRACKIO_WRITE_TOKEN` on every node, call `trackio.init()` on each node's local
@@ -381,6 +444,8 @@ order and the sidebar's device filter shows GPUs per host (`gpu-node-02 · GPU
 
 | Symptom | Check |
 | --- | --- |
+| `pip install` fails with "npm is not available" | Install Node.js 18+ (step 1) and rerun; in a new shell run `source ~/.nvm/nvm.sh` first. |
+| Dashboard is empty although training ran on the same machine | The dashboard and training use different data directories: export the same `TRACKIO_DIR` for both, or neither. |
 | `Connection refused` / timeout | The server binds `127.0.0.1` unless started with `--host 0.0.0.0`; firewall; the SSH tunnel is still running. |
 | `401` / `403`, or "write access" errors | `TRACKIO_WRITE_TOKEN` matches the server's; the server was restarted without a fixed token. |
 | Run appears but no `gpu/` charts | `trackio[gpu]` (`nvidia-ml-py`) is installed and `nvidia-smi` works for this user; pass `auto_log_gpu=True` to force it. |
