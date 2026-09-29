@@ -2,7 +2,9 @@
 
 import functools
 import hashlib
+import json
 import subprocess
+from importlib import metadata
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -21,18 +23,30 @@ def _git(*args: str) -> bytes | None:
     return result.stdout
 
 
+def _installed_revision() -> str | None:
+    try:
+        text = metadata.distribution("trackio").read_text("direct_url.json")
+        commit = json.loads(text or "{}").get("vcs_info", {}).get("commit_id")
+    except (metadata.PackageNotFoundError, ValueError, AttributeError, OSError):
+        return None
+    return commit[:7] if isinstance(commit, str) and commit else None
+
+
 @functools.cache
 def git_revision() -> str | None:
     """Short commit hash of the source checkout, e.g. ``9945ca9``.
 
     Uncommitted changes (edits to tracked files and new untracked files)
     append a hash of those changes (``9945ca9+3f2a1c``), so every distinct
-    working tree gets a distinct revision. Returns None for installs that are not a git checkout.
+    working tree gets a distinct revision. Installs made with
+    ``pip install "trackio @ git+https://...@<branch>"`` have no checkout;
+    for those the commit recorded by the installer (PEP 610
+    ``direct_url.json``) is used. Returns None for other installs.
     Computed once per process, so a running server reports the code it
     was started with.
     """
     if not (_REPO_ROOT / ".git").exists():
-        return None
+        return _installed_revision()
     head = _git("rev-parse", "--short", "HEAD")
     if not head:
         return None

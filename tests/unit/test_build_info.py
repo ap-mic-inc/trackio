@@ -1,3 +1,4 @@
+import json
 import subprocess
 
 from trackio import build_info
@@ -37,8 +38,19 @@ def test_git_revision_dirty_depends_on_diff(monkeypatch, tmp_path):
     assert revisions[0] != revisions[1]
 
 
+class _FakeDist:
+    def __init__(self, text):
+        self.text = text
+
+    def read_text(self, name):
+        return self.text if name == "direct_url.json" else None
+
+
 def test_git_revision_not_a_checkout(monkeypatch, tmp_path):
     monkeypatch.setattr(build_info, "_REPO_ROOT", tmp_path)
+    monkeypatch.setattr(
+        build_info.metadata, "distribution", lambda name: _FakeDist(None)
+    )
     build_info.git_revision.cache_clear()
     assert build_info.git_revision() is None
     assert build_info.version_string("1.2.3") == "1.2.3"
@@ -75,3 +87,25 @@ def test_git_revision_includes_untracked_files(monkeypatch, tmp_path):
     build_info.git_revision.cache_clear()
     assert first.startswith("abc1234+")
     assert first != second
+
+
+def test_git_url_install_reports_installed_commit(monkeypatch, tmp_path):
+    monkeypatch.setattr(build_info, "_REPO_ROOT", tmp_path)
+    direct_url = {
+        "url": "https://github.com/ap-mic-inc/trackio",
+        "vcs_info": {"vcs": "git", "commit_id": "e1c754ae13280802d363817031d9"},
+    }
+    monkeypatch.setattr(
+        build_info.metadata,
+        "distribution",
+        lambda name: _FakeDist(json.dumps(direct_url)),
+    )
+    build_info.git_revision.cache_clear()
+    assert build_info.git_revision() == "e1c754a"
+    assert build_info.version_string("1.2.3") == "1.2.3 (e1c754a)"
+    monkeypatch.setattr(
+        build_info.metadata, "distribution", lambda name: _FakeDist("not json")
+    )
+    build_info.git_revision.cache_clear()
+    assert build_info.git_revision() is None
+    build_info.git_revision.cache_clear()
