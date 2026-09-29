@@ -102,3 +102,22 @@ def test_init_stores_system_config(temp_dir, monkeypatch):
     trackio.finish()
     assert "_System" not in SQLiteStorage.get_all_run_configs("dev")[run.id]
 
+
+def test_system_only_run_summary_includes_config(temp_dir):
+    from trackio import server
+    from trackio.sqlite_storage import SQLiteStorage
+
+    config = {"_System": {"hostname": "gpu-node-02"}, "_Group": "job"}
+    SQLiteStorage.bulk_log_system(
+        project="nodes",
+        run="job-node1",
+        run_id="rid-1",
+        metrics_list=[{"gpu/0/utilization": 90.0}],
+        config=config,
+    )
+    assert SQLiteStorage.get_run_config("nodes", "job-node1")["_System"] == {
+        "hostname": "gpu-node-02"
+    }
+    summary = server.get_run_summary("nodes", run_id="rid-1")
+    assert summary["num_logs"] == 0
+    assert summary["config"]["_System"]["hostname"] == "gpu-node-02"

@@ -1159,7 +1159,7 @@ def get_run_summary(
             "run_id": run_id,
             "num_logs": 0,
             "metrics": [],
-            "config": None,
+            "config": SQLiteStorage.get_run_config(project, run, run_id=run_id),
             "last_step": None,
         }
 

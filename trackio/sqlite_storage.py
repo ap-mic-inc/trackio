@@ -3503,6 +3503,8 @@ class SQLiteStorage:
             try:
                 run_identity = SQLiteStorage._resolve_run_identity(
                     conn, run_name=run, run_id=run_id, table="metrics"
+                ) or SQLiteStorage._resolve_run_identity(
+                    conn, run_name=run, run_id=run_id, table="system_metrics"
                 )
                 if run_identity is None:
                     return None
