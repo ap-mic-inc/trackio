@@ -69,12 +69,27 @@ uv pip install trackio
 
 ### Installing the ap-mic-inc fork
 
-Features added in this fork (coding-agent traces and `trackio hooks`, alert
-dismissal, multi-node system metrics, per-page Quickstarts, build revisions, and
-dashboard fixes) are not in the PyPI release. Install the fork from GitHub,
-replacing `main` with a branch or tag if you need one:
+This fork adds features that are not in the PyPI release:
+
+| Feature | Where to find it |
+| --- | --- |
+| Claude Code and Codex sessions as traces (`trackio hooks install`, `trackio import agent-session`) | Traces page, [Coding-agent traces](#coding-agent-traces-claude-code-codex) |
+| Automatic Hugging Face dataset lineage | Run and artifact Lineage, [Dataset lineage](#dataset-lineage) |
+| Artifact lineage on every run | Runs → a run → Lineage |
+| Per-project disk usage and free space | Settings → Storage |
+| Dismissing alerts | Alert panel (needs write access) |
+| Multi-node system metrics (one run per node, grouped) | System Metrics → Quickstart → Multi-node |
+| A Quickstart on every page, including storage limits and large-data tips | Top of each page |
+| Markdown reports with tables, links, and code blocks | Alerts & Reports |
+| Source revision in `trackio --version` and under the dashboard logo | See below |
+| Fixes: Discord webhooks, `trackio.save()` paths, a path traversal in uploads, distinct trace ids, and more | — |
+
+Install it from GitHub. Until these changes are merged into `main`, use the
+feature branch:
 
 ```bash
+pip install "trackio @ git+https://github.com/ap-mic-inc/trackio@feat/agent-traces-and-dashboard-fixes"
+# after the merge:
 pip install "trackio @ git+https://github.com/ap-mic-inc/trackio@main"
 ```
 
@@ -222,6 +237,54 @@ trackio.init(project="my-project", server_url="http://127.0.0.1:7860?write_token
 ```
 
 You can also set `TRACKIO_SERVER_URL` (and optionally `TRACKIO_WRITE_TOKEN` if the URL has no query string). If `space_id` / `TRACKIO_SPACE_ID` and `server_url` / `TRACKIO_SERVER_URL` are both set, Trackio uses the Hugging Face Space and ignores the self-hosted URL.
+
+### Getting the write token
+
+By default anyone who can reach a self-hosted dashboard can read it (set
+`TRACKIO_AUTH_REQUIRED=1`, or enable it on the Admin page, to require sign-in
+for everything). Logging, uploads, dismissing alerts, and renaming or deleting
+runs need write access, which comes from one of:
+
+1. **The write token.** The server takes it from `TRACKIO_WRITE_TOKEN` when it
+   starts, or generates a random one (a new one on every restart). `trackio
+   show` prints the full link in its output:
+
+   ```text
+   * Trackio dashboard opened in browser with write access at: http://127.0.0.1:7860?write_token=...
+   ```
+
+   In Python, `trackio.show()` returns it as the fourth value
+   (`app, url, share_url, full_url = trackio.show(block_thread=False)`). If
+   someone else runs the server, ask them for this link or the token.
+2. **Signing in** with an account that has the `write` or `admin` role: local
+   accounts created on the Admin page (which you open with the write-token
+   link), or OIDC when it is configured (see
+   [OIDC authentication](docs/source/oidc_auth.md)).
+3. **On Hugging Face Spaces**, signing in with a Hugging Face account that has
+   write access to the Space.
+
+How the token is sent:
+
+- **Browser**: open the link once. The dashboard stores the token in a
+  `trackio_write_token` cookie for 7 days and removes it from the address bar;
+  after that, or after the server's token changes, open the link again.
+  Without write access the dashboard is read-only and explains how to get it
+  where an action needs it.
+- **Training jobs, hooks, and scripts**: put it in the server URL
+  (`server_url="http://host:7860?write_token=..."`) or set
+  `TRACKIO_SERVER_URL` plus `TRACKIO_WRITE_TOKEN`. It is sent as the
+  `X-Trackio-Write-Token` header.
+
+Start long-running servers with a fixed token so restarts do not lock out
+browsers, training jobs, and agent hooks, and keep it out of version control:
+
+```bash
+(umask 077; python -c "import secrets; print(secrets.token_urlsafe(32))" > ~/.trackio-write-token)
+TRACKIO_WRITE_TOKEN=$(cat ~/.trackio-write-token) trackio show
+```
+
+Anyone with the token can write logs, change runs, and connect MCP tools, so
+share it only with trusted users.
 
 See the documentation: [Self-host the Server](https://huggingface.co/docs/trackio/self_hosted_server).
 
