@@ -316,6 +316,15 @@ trackio.finish()
 
 You can query alerts via the CLI (`trackio get alerts --project "my-project" --json`), the Python API (`trackio.Api().alerts("my-project")`), or the HTTP endpoint (`/get_alerts`). For full details, see the [Alerts guide](https://huggingface.co/docs/trackio/alerts) and the [ML Agents guide](https://huggingface.co/docs/trackio/ml_agents).
 
+## Dataset lineage
+
+Hugging Face Hub datasets loaded with `datasets.load_dataset()` inside a run are
+recorded automatically as the run's inputs, pinned to the dataset commit
+(nothing is copied), so each run's Lineage shows which data it used. It is on
+when `datasets` is imported before `trackio.init()`; control it with
+`trackio.init(track_datasets=...)` or `TRACKIO_TRACK_DATASETS=0|1`. See the
+[artifacts guide](docs/source/artifacts.md#tracking-hugging-face-datasets-automatically).
+
 ## Coding-agent traces (Claude Code, Codex)
 
 Record every Claude Code or Codex turn as a trace: each session becomes a run,

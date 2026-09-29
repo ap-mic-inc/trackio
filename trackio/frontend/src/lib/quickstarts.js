@@ -672,6 +672,35 @@ trackio.finish()`,
         hint: 'Resolve <code>"my-model"</code> (latest), a version like <code>"my-model:v2"</code>, or an alias. Using an artifact records the lineage edge.',
       },
       {
+        id: "hf-datasets",
+        label: "Hugging Face datasets",
+        code: `from datasets import load_dataset
+import trackio
+
+trackio.init(project="${p}")  # dataset tracking is on because datasets is imported
+
+train = load_dataset("org/my-dataset", split="train")          # recorded as an input
+evals = load_dataset("org/my-dataset", split="validation")     # same commit: recorded once
+local = load_dataset("csv", data_files="extra.csv")            # local files: not recorded
+
+trackio.finish()`,
+        hint: `<ul>
+          <li><strong>Automatic dataset lineage.</strong> Every Hub dataset loaded with
+            <code>load_dataset()</code> during a run becomes a <code>dataset</code>
+            artifact named <code>hf-&lt;org&gt;--&lt;name&gt;</code> and an input of the
+            run, so it shows up in the run's Lineage.</li>
+          <li><strong>Pinned, not copied.</strong> The artifact holds one reference,
+            <code>hf://datasets/&lt;repo&gt;@&lt;commit&gt;</code>. A new commit on the Hub
+            becomes a new version, so you can see which runs used which data.</li>
+          <li><strong>On by default when <code>datasets</code> is imported</strong>
+            before <code>trackio.init()</code>. Force it with
+            <code>track_datasets=True</code> or <code>TRACKIO_TRACK_DATASETS=1</code>;
+            turn it off with <code>False</code> or <code>0</code>.</li>
+          <li>Data loaded from local files, pandas, or custom loaders is not detected;
+            register it with <code>trackio.use_artifact()</code>.</li>
+        </ul>`,
+      },
+      {
         id: "references",
         label: "Large data",
         code: `import trackio

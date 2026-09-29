@@ -111,6 +111,38 @@ path = artifact.download()
 
 By default, files are written to `./.trackio/artifact-downloads/<project>/<name>_v<version>/`, keyed by project so same-named artifacts from different projects never collide; pass `root` to choose another directory. `download()` is idempotent — files already present are skipped — and when the run is backed by a Space, any file missing locally is fetched from the remote.
 
+## Tracking Hugging Face datasets automatically
+
+Datasets loaded from the Hugging Face Hub with `datasets.load_dataset()` are
+recorded as run inputs without any extra code, so they appear in each run's
+lineage:
+
+```python
+from datasets import load_dataset
+import trackio
+
+trackio.init(project="my_project")
+train = load_dataset("org/my-dataset", split="train")
+trackio.finish()
+```
+
+Each Hub dataset becomes a `dataset` artifact named `hf-<org>--<name>` (plus
+`--<config>` when a config is selected) holding a single reference,
+`hf://datasets/<repo>@<commit sha>`, with the repo, config, and revision in its
+metadata. Nothing is downloaded or copied into Trackio. Loading the same commit
+again reuses the version, and a new commit on the Hub becomes a new version, so
+the lineage shows exactly which data each run used. These artifacts have no
+producer run.
+
+Tracking is on when the `datasets` library has been imported before
+`trackio.init()`. Pass `track_datasets=True` or set `TRACKIO_TRACK_DATASETS=1`
+to enable it regardless (this imports `datasets`), and `track_datasets=False` or
+`TRACKIO_TRACK_DATASETS=0` to turn it off. Only Hub datasets are detected: data
+loaded from local files (`load_dataset("csv", data_files=...)`), pandas, or
+custom loaders should be registered as an artifact and used with
+`trackio.use_artifact()`. If recording fails (for example, offline), Trackio
+prints one warning and loading continues.
+
 ## Referencing external data
 
 Some data is too large to copy, or already lives in durable storage you don't want duplicated. `add_reference` records such data by **URI** in the manifest *without staging any bytes* into Trackio's storage, so you still get versioning, de-duplication, aliases, and lineage over data that never moves:
