@@ -19,10 +19,12 @@ import argparse
 import math
 import os
 import random
+import re
 import sqlite3
 import tempfile
 import time
 import uuid
+import zlib
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -349,13 +351,73 @@ def rl_metrics(step: int, total: int, spec: dict, rng: random.Random) -> dict:
 METRIC_FNS = {"llm": llm_metrics, "vision": vision_metrics, "rl": rl_metrics}
 
 
-def full_config(config: dict, group: str | None, created: datetime) -> dict:
-    return {
+GPU_MODELS = {
+    "H100": ("NVIDIA H100 80GB HBM3", 79.6),
+    "A100": ("NVIDIA A100-SXM4-80GB", 79.2),
+}
+
+
+def fake_system(
+    hostname: str,
+    gpu: str | None,
+    gpu_count: int,
+    node_rank: int | None = None,
+    num_nodes: int | None = None,
+    local_world_size: int | None = None,
+) -> dict:
+    """A `_System` block shaped like trackio.device_info.collect()."""
+    info: dict = {
+        "hostname": hostname,
+        "os": "Linux-5.15.0-119-generic-x86_64-with-glibc2.35",
+        "cpu": {
+            "model": "AMD EPYC 9654 96-Core Processor",
+            "logical_cores": 384,
+            "physical_cores": 192,
+            "memory_gb": 1511.7,
+        },
+        "versions": {"python": "3.11.9", "torch": "2.5.1+cu124", "torch_cuda": "12.4"},
+    }
+    model = GPU_MODELS.get((gpu or "")[:4])
+    if model and gpu_count:
+        name, memory = model
+        info["gpu"] = {
+            "driver_version": "550.54.15",
+            "cuda_driver_version": "12.4",
+            "gpus": [
+                {
+                    "index": i,
+                    "name": name,
+                    "memory_gb": memory,
+                    "uuid": f"GPU-{uuid.uuid5(uuid.NAMESPACE_DNS, f'{hostname}/{i}')}",
+                }
+                for i in range(gpu_count)
+            ],
+        }
+    if node_rank is not None:
+        local = local_world_size or gpu_count or 1
+        info["distributed"] = {
+            "node_rank": node_rank,
+            "num_nodes": num_nodes,
+            "rank": node_rank * local,
+            "local_rank": 0,
+            "world_size": (num_nodes or 1) * local,
+            "local_world_size": local,
+        }
+    return info
+
+
+def full_config(
+    config: dict, group: str | None, created: datetime, system: dict | None = None
+) -> dict:
+    result = {
         **config,
         "_Username": USERNAME,
         "_Created": iso(created),
         "_Group": group,
     }
+    if system:
+        result["_System"] = system
+    return result
 
 
 def seed_backdated_run(
@@ -370,6 +432,9 @@ def seed_backdated_run(
     metric_fn = METRIC_FNS[spec["kind"]]
     metrics_list = [metric_fn(i, steps, spec, rng) for i in range(steps)]
 
+    per_node = re.search(r"x(\d+)$", str(spec["config"].get("gpu", "")))
+    gpu_count = min(int(per_node.group(1)), 8) if per_node else 2
+    host = f"gpu-ws-{zlib.crc32(spec['name'].encode()) % 90 + 10:02d}"
     SQLiteStorage.bulk_log(
         project=project,
         run=spec["name"],
@@ -377,12 +442,16 @@ def seed_backdated_run(
         metrics_list=metrics_list,
         steps=list(range(steps)),
         timestamps=timestamps,
-        config=full_config(spec["config"], spec["group"], start),
+        config=full_config(
+            spec["config"],
+            spec["group"],
+            start,
+            fake_system(host, spec["config"].get("gpu"), gpu_count),
+        ),
     )
 
     n_sys = min(120, steps)
     sys_span = (end - start) / max(1, n_sys - 1)
-    gpu_count = 8 if "x8" in str(spec["config"].get("gpu", "")) else 2
     system_list = []
     for i in range(n_sys):
         entry = {
@@ -459,6 +528,100 @@ def seed_backdated_run(
         steps=[a[3] for a in alerts],
         timestamps=[iso(a[4]) for a in alerts],
     )
+
+
+MULTINODE_JOB = {
+    "name": "llama3-70b-pretrain-3node",
+    "group": "multinode-pretrain",
+    "gpus_per_node": 4,
+    "steps": 300,
+    "ended_ago": timedelta(minutes=30),
+    "duration": timedelta(hours=3),
+    "nodes": [
+        ("gpu-node-01", "H100"),
+        ("gpu-node-02", "H100"),
+        ("gpu-node-03", "A100"),
+    ],
+    "config": {
+        "model": "llama3-70b",
+        "task": "pretrain",
+        "lr": 1.5e-4,
+        "global_batch": 1536,
+        "seq_len": 8192,
+        "parallelism": {"tp": 4, "pp": 1, "dp": 3},
+    },
+}
+
+
+def seed_multinode_job(project: str, now: datetime, rng: random.Random) -> list[str]:
+    """One run per node of a 3-node job, as the multi-node recipe produces:
+    node 0 logs training metrics, every node logs its own GPUs, and each run
+    records its host and placement in `_System`. The third node has different
+    GPUs so mixed models show up in the dashboard."""
+    job = MULTINODE_JOB
+    end = now - job["ended_ago"]
+    start = end - job["duration"]
+    steps = job["steps"]
+    num_nodes = len(job["nodes"])
+    names = []
+    for node_rank, (host, gpu) in enumerate(job["nodes"]):
+        name = f"{job['name']}-node{node_rank}"
+        run_id = uuid.uuid4().hex
+        config = full_config(
+            job["config"],
+            job["group"],
+            start,
+            fake_system(
+                host,
+                gpu,
+                job["gpus_per_node"],
+                node_rank=node_rank,
+                num_nodes=num_nodes,
+            ),
+        )
+        if node_rank == 0:
+            span = (end - start) / (steps - 1)
+            spec = {"config": {"optimizer": {"lr": job["config"]["lr"]}}}
+            SQLiteStorage.bulk_log(
+                project=project,
+                run=name,
+                run_id=run_id,
+                metrics_list=[llm_metrics(i, steps, spec, rng) for i in range(steps)],
+                steps=list(range(steps)),
+                timestamps=[iso(start + span * i) for i in range(steps)],
+                config=config,
+            )
+        n_sys = 120
+        sys_span = (end - start) / (n_sys - 1)
+        slower = gpu == "A100"
+        system_list = []
+        for i in range(n_sys):
+            entry = {
+                "cpu/percent": round(min(100, noisy(48, 6, rng)), 1),
+                "cpu/memory_used_gb": round(noisy(620, 15, rng), 2),
+            }
+            for g in range(job["gpus_per_node"]):
+                entry[f"gpu/{g}/utilization"] = round(
+                    min(100, max(0, noisy(97 if slower else 88, 3, rng))), 1
+                )
+                entry[f"gpu/{g}/memory_used_gb"] = round(noisy(74, 1.2, rng), 2)
+                entry[f"gpu/{g}/temperature_c"] = round(
+                    noisy((61 if slower else 70) + g, 2, rng), 1
+                )
+                entry[f"gpu/{g}/power_w"] = round(
+                    noisy(390 if slower else 640, 20, rng), 1
+                )
+            system_list.append(entry)
+        SQLiteStorage.bulk_log_system(
+            project=project,
+            run=name,
+            run_id=run_id,
+            metrics_list=system_list,
+            timestamps=[iso(start + sys_span * i) for i in range(n_sys)],
+            config=config if node_rank else None,
+        )
+        names.append(name)
+    return names
 
 
 def seed_awaiting_run(project: str, spec: dict, now: datetime) -> None:
@@ -815,6 +978,8 @@ def main() -> None:
     for spec in AWAITING_RUNS:
         seed_awaiting_run(args.project, spec, now)
         print(f"seeded awaiting run {spec['name']}")
+    for name in seed_multinode_job(args.project, now, rng):
+        print(f"seeded multi-node run {name}")
 
     if not args.no_media:
         seed_showcase_run(args.project)

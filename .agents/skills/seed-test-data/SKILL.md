@@ -1,6 +1,6 @@
 ---
 name: seed-test-data
-description: Seed a Trackio project with rich, realistic test data (every Overview run state, grouped runs, nested configs, diverging/NaN runs, system metrics, alerts, media, traces, artifacts, project files, live runs) for dashboard development. Use when asked to generate/add test data, demo data, fake runs, 測試資料, 假資料, or to populate a running dashboard.
+description: Seed a Trackio project with rich, realistic test data (every Overview run state, grouped runs, nested configs, diverging/NaN runs, system metrics, multi-node device info, alerts, media, traces, artifacts, project files, live runs) for dashboard development. Use when asked to generate/add test data, demo data, fake runs, 測試資料, 假資料, or to populate a running dashboard.
 ---
 
 # Seed rich test data
@@ -72,7 +72,7 @@ from trackio.sqlite_storage import SQLiteStorage as S
 print(len(S.get_run_status('rd-rich-demo')))"
 ```
 
-Expect 19 runs with `--live-seconds`, 17 without (15 with `--no-media`). For UI work, screenshot
+Expect 22 runs with `--live-seconds`, 20 without (17 with `--no-media`). For UI work, screenshot
 `http://127.0.0.1:<port>/overview?project=rd-rich-demo` with Playwright (installed
 in `.venv`) and look at it; add `?__theme=dark` for dark mode.
 
@@ -82,7 +82,7 @@ in `.venv`) and look at it; add `?__theme=dark` for dark mode.
   (Quiet), runs ended hours to 12 days ago (No recent logs), and two config-only
   queued runs (Awaiting logs).
 - **Groups**: `llm-sft`, `knowledge-distill`, `vision`, `rl-ppo`,
-  `layout-edge-cases`, `showcase`, `live`.
+  `layout-edge-cases`, `showcase`, `live`, `multinode-pretrain`.
 - **Configs**: nested dicts, lists and Chinese notes, for config search and
   run detail panels.
 - **Metrics**: LLM SFT/distillation (`train/`, `eval/`, `distill/`, `perf/`),
@@ -90,6 +90,12 @@ in `.venv`) and look at it; add `?__theme=dark` for dark mode.
 - **Edge cases**: loss divergence at step 300, NaN/Inf after step 200, a 3-step
   run, a very long run name, a Unicode/emoji run name.
 - **System metrics**: CPU plus per-GPU utilization, memory, temperature, power.
+- **Devices / multi-node**: every backdated run has a `_System` config block
+  (host, CPU, GPU inventory) like `trackio.init()` records. The
+  `multinode-pretrain` group is one 3-node job, `llama3-70b-pretrain-3node-node0..2`:
+  node 0 logs training metrics, every node logs its own 4 GPUs, and node 2 has
+  A100s instead of H100s, so System Metrics shows the Nodes table and "2 models"
+  next to each GPU filter.
 - **Alerts**: info, warn and error, with steps and backdated timestamps.
 - **Showcase run**: images, histograms, tables, a markdown report, bilingual
   traces, and model and dataset artifacts.
