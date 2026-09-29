@@ -10,6 +10,7 @@
   import { latestOnlySelection } from "../lib/selection.js";
   import { filterMetricsByRegex } from "../lib/dataProcessing.js";
   import { computeGroupByOptions, computeGroupedRuns } from "../lib/grouping.js";
+  import { groupDeviceKeys } from "../lib/devices.js";
   import {
     AUTO_PANELS_PER_ROW,
     PANELS_PER_ROW_CHOICES,
@@ -25,6 +26,7 @@
     runs = [],
     selectedRuns = $bindable([]),
     availableSystemDevices = [],
+    systemDeviceModels = {},
     selectedSystemDevices = $bindable([]),
     smoothing = $bindable(10),
     panelsPerRow = $bindable(AUTO_PANELS_PER_ROW),
@@ -150,6 +152,21 @@
       selectedRuns = desired;
     }
   });
+
+  let deviceGroups = $derived(groupDeviceKeys(availableSystemDevices));
+
+  function toggleDeviceGroup(group) {
+    const keys = group.devices.map((d) => d.key);
+    const allOn = keys.every((k) => selectedSystemDevices.includes(k));
+    if (allOn) {
+      selectedSystemDevices = selectedSystemDevices.filter((d) => !keys.includes(d));
+    } else {
+      selectedSystemDevices = [
+        ...selectedSystemDevices,
+        ...keys.filter((k) => !selectedSystemDevices.includes(k)),
+      ];
+    }
+  }
 
   function toggleDevice(device) {
     if (selectedSystemDevices.includes(device)) {
@@ -475,18 +492,35 @@
                 />
                 <span class="section-sublabel">Devices ({availableSystemDevices.length})</span>
               </label>
-              <div class="checkbox-group">
-                {#each availableSystemDevices as device}
-                  <label class="checkbox-item">
+              {#each deviceGroups as group (group.scope)}
+                {@const groupSelected = group.devices.filter((d) => selectedSystemDevices.includes(d.key)).length}
+                {#if group.scope}
+                  <label class="select-all-label device-host">
                     <input
                       type="checkbox"
-                      checked={selectedSystemDevices.includes(device)}
-                      onchange={() => toggleDevice(device)}
+                      class="select-all-cb"
+                      checked={groupSelected === group.devices.length}
+                      use:setIndeterminate={groupSelected > 0 && groupSelected < group.devices.length}
+                      onchange={() => toggleDeviceGroup(group)}
                     />
-                    <span class="run-name" title={device}>{device}</span>
+                    <span class="run-group-label" title={group.scope}>{group.scope}</span>
+                    <span class="run-group-count">({group.devices.length})</span>
                   </label>
-                {/each}
-              </div>
+                {/if}
+                <div class="checkbox-group" class:device-host-items={group.scope}>
+                  {#each group.devices as device (device.key)}
+                    {@const model = systemDeviceModels[device.key]}
+                    <label class="checkbox-item">
+                      <input
+                        type="checkbox"
+                        checked={selectedSystemDevices.includes(device.key)}
+                        onchange={() => toggleDevice(device.key)}
+                      />
+                      <span class="run-name" title={model ? `${device.key} · ${model}` : device.key}>{device.label}{#if model}<span class="device-model">· {model}</span>{/if}</span>
+                    </label>
+                  {/each}
+                </div>
+              {/each}
             </div>
           {/if}
         </div>
@@ -906,6 +940,16 @@
     align-items: center;
     justify-content: space-between;
     margin-bottom: 6px;
+  }
+  .device-host {
+    margin: 8px 0 4px;
+  }
+  .device-host-items {
+    padding-left: 22px;
+  }
+  .device-model {
+    margin-left: 0.35em;
+    color: var(--body-text-color-subdued, #6b7280);
   }
   .select-all-label {
     display: flex;

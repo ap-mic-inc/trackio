@@ -131,6 +131,7 @@
   let readOnlySource = $state(null);
   let spaceId = $state(null);
   let availableSystemDevices = $state([]);
+  let systemDeviceModels = $state({});
   let selectedSystemDevices = $state([]);
   let tabAvailability = $state({});
   let tabAvailabilityRequestId = 0;
@@ -693,6 +694,7 @@
       bind:filterText
       {metricColumns}
       {availableSystemDevices}
+      {systemDeviceModels}
       bind:selectedSystemDevices
       {spaceId}
       {logoUrls}
@@ -768,6 +770,8 @@
           {realtimeEnabled}
           bind:availableDevices={availableSystemDevices}
           bind:selectedDevices={selectedSystemDevices}
+          bind:deviceModels={systemDeviceModels}
+          {runConfigs}
         />
       {:else if currentPage === "media"}
         <Media

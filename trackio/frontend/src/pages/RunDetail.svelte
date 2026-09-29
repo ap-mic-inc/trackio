@@ -9,6 +9,7 @@
     setArtifactSelectionParams,
   } from "../lib/router.js";
   import { formatSize } from "../lib/format.js";
+  import { gpuSummary, placementLabel, systemInfo } from "../lib/devices.js";
 
   let { project = null } = $props();
 
@@ -19,6 +20,13 @@
   let runArtifacts = $state({ input: [], output: [] });
   let expandedArtifact = $state({});
   let LineageSection = $state(null);
+  let system = $derived(systemInfo(summary?.config));
+  let userConfig = $derived.by(() => {
+    if (!summary?.config) return null;
+    return Object.fromEntries(
+      Object.entries(summary.config).filter(([key]) => key !== "_System"),
+    );
+  });
 
   let lineageVersionId = $derived(
     (runArtifacts.output[0] ?? runArtifacts.input[0])?.version_id ?? null,
@@ -180,9 +188,57 @@
         </div>
       </div>
 
-      {#if summary.config}
+      {#if system}
+        <h3>System</h3>
+        <dl class="system-grid">
+          <dt>Host</dt>
+          <dd>{system.hostname}</dd>
+          {#if placementLabel(system)}
+            <dt>Placement</dt>
+            <dd>{placementLabel(system)}</dd>
+          {/if}
+          {#if gpuSummary(system)}
+            <dt>GPUs</dt>
+            <dd>
+              {gpuSummary(system)}
+              {#if system.gpu.driver_version || system.gpu.cuda_driver_version}
+                <span class="system-sub">
+                  driver {system.gpu.driver_version ?? "—"} · CUDA {system.gpu.cuda_driver_version ?? "—"}{system.gpu.cuda_visible_devices != null ? ` · CUDA_VISIBLE_DEVICES=${system.gpu.cuda_visible_devices}` : ""}
+                </span>
+              {/if}
+              <ul class="gpu-list">
+                {#each system.gpu.gpus as g}
+                  <li>
+                    <span class="gpu-index">GPU {g.index}</span>
+                    {g.name ?? "—"}{g.memory_gb != null ? ` · ${g.memory_gb} GB` : ""}
+                    {#if g.uuid}<code title={g.uuid}>{g.uuid.slice(0, 12)}…</code>{/if}
+                  </li>
+                {/each}
+              </ul>
+            </dd>
+          {/if}
+          {#if system.cpu}
+            <dt>CPU</dt>
+            <dd>
+              {system.cpu.model ?? "—"}
+              <span class="system-sub">
+                {system.cpu.physical_cores != null ? `${system.cpu.physical_cores} cores / ` : ""}{system.cpu.logical_cores ?? "?"} threads{system.cpu.memory_gb != null ? ` · ${system.cpu.memory_gb} GB RAM` : ""}
+              </span>
+            </dd>
+          {/if}
+          <dt>Software</dt>
+          <dd>
+            {system.os ?? "—"}
+            <span class="system-sub">
+              Python {system.versions?.python ?? "—"}{system.versions?.torch ? ` · PyTorch ${system.versions.torch}` : ""}{system.versions?.torch_cuda ? ` (CUDA ${system.versions.torch_cuda})` : ""}
+            </span>
+          </dd>
+        </dl>
+      {/if}
+
+      {#if userConfig}
         <h3>Configuration</h3>
-        <pre class="config-block">{JSON.stringify(summary.config, null, 2)}</pre>
+        <pre class="config-block">{JSON.stringify(userConfig, null, 2)}</pre>
       {/if}
 
       {#if runArtifacts.output.length > 0}
@@ -224,6 +280,48 @@
 </div>
 
 <style>
+  .system-grid {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 6px 16px;
+    margin: 0 0 8px;
+    font-size: 13px;
+  }
+  .system-grid dt {
+    color: var(--body-text-color-subdued, #6b7280);
+  }
+  .system-grid dd {
+    margin: 0;
+    color: var(--body-text-color, #1f2937);
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .system-sub {
+    display: block;
+    color: var(--body-text-color-subdued, #6b7280);
+    font-size: 12px;
+  }
+  .gpu-list {
+    margin: 6px 0 0;
+    padding: 0;
+    list-style: none;
+    font-size: 12px;
+  }
+  .gpu-list li + li {
+    margin-top: 2px;
+  }
+  .gpu-index {
+    display: inline-block;
+    min-width: 44px;
+    color: var(--body-text-color-subdued, #6b7280);
+  }
+  .gpu-list code {
+    margin-left: 6px;
+    padding: 1px 4px;
+    border-radius: var(--radius-sm, 3px);
+    background: var(--background-fill-secondary, #f3f4f6);
+    font-size: 11px;
+  }
   .lineage-desc {
     margin: -4px 0 10px;
     color: var(--body-text-color-subdued, #6b7280);

@@ -21,6 +21,14 @@
     logsHaveNewData,
   } from "../lib/dataProcessing.js";
   import { buildColorMap } from "../lib/stores.js";
+  import {
+    deviceKey,
+    deviceScopes,
+    gpuModelsByDevice,
+    nodeRows,
+    sortDeviceKeys,
+    splitDeviceKey,
+  } from "../lib/devices.js";
 
   let {
     project = null,
@@ -31,7 +39,18 @@
     realtimeEnabled = true,
     availableDevices = $bindable([]),
     selectedDevices = $bindable([]),
+    deviceModels = $bindable({}),
+    runConfigs = {},
   } = $props();
+
+  let nodes = $derived(nodeRows(selectedRuns, runConfigs));
+  let scopes = $derived(deviceScopes(selectedRuns, runConfigs));
+  let runMetricNames = $state(new Map());
+
+  $effect(() => {
+    const next = gpuModelsByDevice(selectedRuns, runConfigs, scopes);
+    if (JSON.stringify(next) !== JSON.stringify(deviceModels)) deviceModels = next;
+  });
 
   let systemData = $state([]);
   let metricNames = $state([]);
@@ -71,12 +90,23 @@
   let availableIndexedDevices = $derived.by(() => {
     const devices = [];
     for (const [groupName, group] of Object.entries(metricGroups)) {
-      for (const subName of sortSubgroupNames(Object.keys(group.subgroups))) {
-        devices.push(formatIndexedSourceLabel(groupName, subName));
+      for (const subName of Object.keys(group.subgroups)) {
+        const label = formatIndexedSourceLabel(groupName, subName);
+        const metrics = group.subgroups[subName];
+        for (const [key, names] of runMetricNames) {
+          if (metrics.some((m) => names.has(m))) {
+            devices.push(deviceKey(scopes.get(key) ?? "", label));
+          }
+        }
       }
     }
-    return [...new Set(devices)];
+    return sortDeviceKeys(devices);
   });
+
+  let selectedDeviceSet = $derived(new Set(selectedDevices));
+  let selectedDeviceLabels = $derived(
+    new Set(selectedDevices.map((key) => splitDeviceKey(key).label)),
+  );
 
   let comparisonMetricsByGroup = $derived.by(() => {
     const map = new Map();
@@ -154,11 +184,13 @@
     if (!project || selectedRuns.length === 0) {
       systemData = [];
       metricNames = [];
+      runMetricNames = new Map();
       return;
     }
 
     const allRows = [];
     const allMetrics = new Set();
+    const perRun = new Map();
 
     for (const run of selectedRuns) {
       const runKey = run.id ?? run.name;
@@ -166,11 +198,14 @@
       if (!logs || logs.length === 0) continue;
 
       const firstTs = new Date(logs[0].timestamp).getTime();
+      const runMetrics = new Set();
+      perRun.set(runKey, runMetrics);
       logs.forEach((row) => {
         const timeSeconds = (new Date(row.timestamp).getTime() - firstTs) / 1000;
         Object.keys(row).forEach((k) => {
           if (typeof row[k] === "number" && k !== "step" && k !== "time") {
             allMetrics.add(k);
+            runMetrics.add(k);
           }
         });
         allRows.push({
@@ -185,6 +220,7 @@
     }
 
     metricNames = Array.from(allMetrics).sort();
+    runMetricNames = perRun;
     systemData = allRows;
   }
 
@@ -424,7 +460,7 @@
     const visibleSubgroups = sortSubgroupNames(Object.keys(subgroups)).filter(
       (subName) => {
         const label = deviceLabel(groupName, subName);
-        return selectedDevices.length === 0 || selectedDevices.includes(label);
+        return selectedDevices.length === 0 || selectedDeviceLabels.has(label);
       },
     );
 
@@ -453,18 +489,26 @@
 
     let relevant = [];
 
+    const filterDevices = selectedDevices.length > 0;
     for (const metric of metrics) {
       const [groupName, subName] = metric.split("/");
+      const label = deviceLabel(groupName, subName);
       for (const row of rows) {
         const value = row[metric];
         if (value == null) continue;
+        if (
+          filterDevices &&
+          !selectedDeviceSet.has(deviceKey(scopes.get(row.series_key) ?? "", label))
+        ) {
+          continue;
+        }
         relevant.push({
           [xColumn]: row[xColumn],
           value,
           seriesKey: `${row.series_key}\0${groupName}\0${subName}`,
           run: row.run,
           series_key: row.series_key,
-          device: deviceLabel(groupName, subName),
+          device: label,
           data_type: row.data_type,
         });
       }
@@ -560,6 +604,41 @@
       </ul>
     </div>
   {:else}
+    {#if nodes.length > 0}
+      <section class="nodes-card">
+        <h3 class="nodes-title">Nodes <span>({nodes.length})</span></h3>
+        <div class="nodes-table-wrap">
+          <table class="nodes-table">
+            <thead>
+              <tr>
+                <th>Run</th>
+                <th>Host</th>
+                <th>Placement</th>
+                <th>GPUs</th>
+                <th>Driver / CUDA</th>
+                <th>CPU</th>
+                <th class="num">RAM</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each nodes as node}
+                <tr>
+                  <td class="run-cell" title={node.run}>
+                    <span class="node-dot" style="background: {runColorMap[node.runId] ?? runColorMap[node.run] ?? 'var(--body-text-color-subdued)'}"></span>{node.run}
+                  </td>
+                  <td>{node.host}</td>
+                  <td>{node.placement ?? "—"}</td>
+                  <td>{node.gpus ?? "—"}</td>
+                  <td>{node.driver || node.cuda ? `${node.driver ?? "—"} / ${node.cuda ?? "—"}` : "—"}</td>
+                  <td class="cpu-cell" title={node.cpu ?? ""}>{node.cpu ?? "—"}</td>
+                  <td class="num">{node.memoryGb != null ? `${node.memoryGb} GB` : "—"}</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    {/if}
     {#each groupNames as groupName}
       {@const group = metricGroups[groupName]}
       {@const directKey = `sys:${groupName}`}
@@ -638,6 +717,67 @@
 </div>
 
 <style>
+  .nodes-card {
+    margin: 0 0 20px;
+  }
+  .nodes-title {
+    margin: 0 0 8px;
+    color: var(--body-text-color, #1f2937);
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .nodes-title span {
+    color: var(--body-text-color-subdued, #6b7280);
+    font-weight: 400;
+  }
+  .nodes-table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--border-color-primary, #e5e7eb);
+    border-radius: var(--radius-lg, 8px);
+    background: var(--background-fill-primary, white);
+  }
+  .nodes-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  .nodes-table th,
+  .nodes-table td {
+    padding: 7px 12px;
+    border-bottom: 1px solid var(--border-color-primary, #e5e7eb);
+    text-align: left;
+    white-space: nowrap;
+  }
+  .nodes-table th {
+    background: var(--background-fill-secondary, #f9fafb);
+    color: var(--body-text-color-subdued, #6b7280);
+    font-weight: 600;
+  }
+  .nodes-table tbody tr:last-child td {
+    border-bottom: none;
+  }
+  .nodes-table .num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .nodes-table .run-cell {
+    max-width: 280px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .nodes-table .cpu-cell {
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .node-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    margin-right: 6px;
+    border-radius: 50%;
+    vertical-align: middle;
+  }
   .system-page {
     min-width: 0;
     box-sizing: border-box;
