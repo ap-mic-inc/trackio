@@ -122,6 +122,7 @@
     loginEnabled: false,
     user: null,
     admin: false,
+    session: false,
   });
   let mutationPollTimer = $state(null);
   let appBootstrapReady = $state(false);
@@ -394,6 +395,7 @@
         loginEnabled: !!s.login_enabled,
         user: s.user ?? null,
         admin: !!s.admin,
+        session: !!s.session,
       };
     } catch {
       mutationStatus = {
@@ -404,6 +406,7 @@
         loginEnabled: false,
         user: null,
         admin: false,
+        session: false,
       };
     }
   }
@@ -802,7 +805,12 @@
           onOpenVersion={openArtifactVersion}
         />
       {:else if currentPage === "settings"}
-        <Settings {spaceId} selectedProject={selectedProject} {projects} />
+        <Settings
+          {spaceId}
+          selectedProject={selectedProject}
+          {projects}
+          signedIn={mutationStatus.session && !mutationStatus.spaces}
+        />
       {:else if currentPage === "admin"}
         <Admin isAdmin={mutationStatus.admin} />
       {/if}

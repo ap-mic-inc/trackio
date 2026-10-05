@@ -1,7 +1,19 @@
 <script>
+  import CodeSnippet from "../components/CodeSnippet.svelte";
   import PageHeader from "../components/PageHeader.svelte";
   import { copyTextToClipboard } from "../lib/clipboard.js";
-  import { getStorageUsage } from "../lib/api.js";
+  import {
+    createMyApiToken,
+    getApiBase,
+    getMyApiTokens,
+    getStorageUsage,
+    revokeMyApiToken,
+  } from "../lib/api.js";
+  import {
+    dashboardServerUrl,
+    maskedToken,
+    tokenUsageSnippet,
+  } from "../lib/apiTokens.js";
   import {
     STORAGE_CATEGORIES,
     diskStatus,
@@ -13,7 +25,69 @@
     setThemePreference,
   } from "../lib/theme.js";
 
-  let { spaceId = null, selectedProject = null, projects = [] } = $props();
+  let {
+    spaceId = null,
+    selectedProject = null,
+    projects = [],
+    signedIn = false,
+  } = $props();
+
+  let apiTokens = $state([]);
+  let apiTokenUser = $state(null);
+  let apiTokenCanWrite = $state(true);
+  let apiTokenError = $state(null);
+  let newTokenName = $state("");
+  let creatingToken = $state(false);
+  let freshToken = $state(null);
+  let revokingTokenId = $state(null);
+  let serverUrl = $derived(dashboardServerUrl(window.location, getApiBase()));
+  let usageSnippet = $derived(tokenUsageSnippet(serverUrl, freshToken?.token ?? null));
+
+  async function loadApiTokens() {
+    apiTokenError = null;
+    try {
+      const data = await getMyApiTokens();
+      apiTokens = data.tokens ?? [];
+      apiTokenUser = data.user ?? null;
+      apiTokenCanWrite = data.can_write !== false;
+    } catch (error) {
+      apiTokenError = String(error?.message || error);
+    }
+  }
+
+  $effect(() => {
+    if (signedIn) loadApiTokens();
+  });
+
+  async function createToken(event) {
+    event.preventDefault();
+    creatingToken = true;
+    apiTokenError = null;
+    try {
+      freshToken = await createMyApiToken(newTokenName);
+      newTokenName = "";
+      await loadApiTokens();
+    } catch (error) {
+      apiTokenError = String(error?.message || error);
+    } finally {
+      creatingToken = false;
+    }
+  }
+
+  async function revokeToken(token) {
+    if (!window.confirm(`Revoke token "${token.name}"? Scripts using it will stop logging.`)) return;
+    revokingTokenId = token.id;
+    apiTokenError = null;
+    try {
+      await revokeMyApiToken(token.id);
+      if (freshToken?.id === token.id) freshToken = null;
+      await loadApiTokens();
+    } catch (error) {
+      apiTokenError = String(error?.message || error);
+    } finally {
+      revokingTokenId = null;
+    }
+  }
 
   let storage = $state(null);
   let storageLoading = $state(false);
@@ -128,6 +202,81 @@
 
   <div class="two-col">
     <div class="col col-left">
+      {#if signedIn}
+        <section class="settings-section" aria-labelledby="api-tokens-title">
+          <h3 class="section-title" id="api-tokens-title">API tokens</h3>
+          <p class="section-desc">
+            Personal tokens let training scripts log to this server as
+            {#if apiTokenUser}<strong>{apiTokenUser}</strong>{:else}you{/if}.
+            Runs are attributed to you and follow your current role; revoke a
+            token to cut off every script using it.
+          </p>
+          {#if !apiTokenCanWrite}
+            <p class="token-warning">Your role is read-only, so tokens cannot log until an admin grants write access.</p>
+          {/if}
+          <form class="token-form" onsubmit={createToken}>
+            <input
+              class="token-input"
+              aria-label="Token name"
+              placeholder="Token name, e.g. gpu-cluster"
+              maxlength="64"
+              bind:value={newTokenName}
+              autocomplete="off"
+            />
+            <button class="token-btn token-btn-primary" type="submit" disabled={creatingToken}>
+              {creatingToken ? "Creating…" : "Create token"}
+            </button>
+          </form>
+          {#if freshToken}
+            <div class="fresh-token" role="status">
+              <p>Copy <strong>{freshToken.name}</strong> now. It will not be shown again.</p>
+              <CodeSnippet code={freshToken.token} />
+            </div>
+          {/if}
+          <p class="section-desc token-usage-label">Set these on every node that runs training:</p>
+          <CodeSnippet code={usageSnippet} />
+          {#if apiTokenError}
+            <p class="token-error" role="alert">{apiTokenError}</p>
+          {/if}
+          {#if apiTokens.length > 0}
+            <div class="storage-table-wrap">
+              <table class="storage-table token-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Token</th>
+                    <th>Created (UTC)</th>
+                    <th>Last used (UTC)</th>
+                    <th><span class="visually-hidden">Actions</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {#each apiTokens as token (token.id)}
+                    <tr>
+                      <td>{token.name}</td>
+                      <td><code>{maskedToken(token)}</code></td>
+                      <td>{token.created_at}</td>
+                      <td>{token.last_used_at ?? "Never"}</td>
+                      <td class="num">
+                        <button
+                          class="token-btn token-btn-danger"
+                          disabled={revokingTokenId === token.id}
+                          onclick={() => revokeToken(token)}
+                        >
+                          {revokingTokenId === token.id ? "Revoking…" : "Revoke"}
+                        </button>
+                      </td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            </div>
+          {:else}
+            <p class="storage-empty">No personal tokens yet.</p>
+          {/if}
+        </section>
+      {/if}
+
       <section class="settings-section">
         <h3 class="section-title">Appearance</h3>
         <p class="section-desc">Choose how the dashboard looks to you.</p>
@@ -464,6 +613,79 @@
     border-radius: var(--radius-sm, 3px);
     background: var(--background-fill-secondary, #f3f4f6);
     font-size: 11px;
+  }
+  .token-form {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 4px;
+  }
+  .token-input {
+    flex: 1;
+    min-width: 0;
+    padding: 7px 10px;
+    border: 1px solid var(--border-color-primary, #e5e7eb);
+    border-radius: var(--radius-md, 6px);
+    background: var(--input-background-fill, white);
+    color: var(--body-text-color, #1f2937);
+    font: inherit;
+    font-size: 13px;
+  }
+  .token-btn {
+    flex-shrink: 0;
+    padding: 6px 12px;
+    border: 1px solid var(--border-color-primary, #e5e7eb);
+    border-radius: var(--radius-md, 6px);
+    background: var(--background-fill-primary, white);
+    color: var(--body-text-color, #1f2937);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .token-btn-primary {
+    border-color: var(--primary-600, #ea580c);
+    background: var(--primary-600, #ea580c);
+    color: white;
+    font-weight: 600;
+  }
+  .token-btn-danger {
+    color: var(--status-danger);
+  }
+  .token-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
+  .fresh-token {
+    margin-top: 14px;
+    padding: 12px 14px 2px;
+    border: 1px solid color-mix(in srgb, var(--primary-600, #ea580c) 40%, transparent);
+    border-radius: var(--radius-lg, 8px);
+    background: color-mix(in srgb, var(--primary-600, #ea580c) 6%, transparent);
+  }
+  .fresh-token p {
+    margin: 0;
+    font-size: 12px;
+    color: var(--body-text-color, #1f2937);
+  }
+  .token-usage-label {
+    margin: 16px 0 0;
+  }
+  .token-warning,
+  .token-error {
+    margin: 0 0 12px;
+    font-size: 12px;
+    color: var(--status-danger);
+  }
+  .token-table code {
+    font-size: 11px;
+  }
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
   }
   .settings-section {
     margin-bottom: 24px;

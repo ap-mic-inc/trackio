@@ -100,11 +100,30 @@ All of this data lives in `TRACKIO_DIR/auth/auth.db` and survives restarts. The 
 | `TRACKIO_OIDC_REDIRECT_BASE` | External base URL used to build the callback URI when the server sits behind a reverse proxy (e.g. `https://trackio.example.com`). Defaults to the request's own base URL. |
 | `TRACKIO_OIDC_COOKIE_SECURE` | Force the `Secure` flag on the session cookie (`1`/`0`). Defaults to on when the request arrived over HTTPS (honors `X-Forwarded-Proto`). |
 
+## Personal API tokens
+
+Signed-in users (OIDC or local) can create personal API tokens on the **Settings** page under *API tokens*. A training script uses one exactly like the server write token:
+
+```bash
+export TRACKIO_SERVER_URL=https://trackio.example.com
+export TRACKIO_WRITE_TOKEN=trk_...
+```
+
+Set the same variables on every node of a multi-node job. Compared with the shared server write token, a personal token:
+
+- **Identifies the person.** Write activity is recorded under the token's owner on the Admin page, and the run's `_Username` config is set by the server to the owner's username (so the Runs page can group by Username). A client-side `_Username` cannot override it.
+- **Follows the owner's current role.** A read-only user's tokens cannot log; changing a user's role on the Admin page applies to their tokens within seconds.
+- **Can be revoked individually.** Users revoke their own tokens on the Settings page; admins can revoke every token of a user from the Admin page. Revocation takes effect immediately.
+- **Never grants admin access**, and cannot be used to create more tokens (that requires a signed-in browser session).
+
+The server stores only a SHA-256 hash of each token. The token is shown once, when it is created.
+
 ## How it interacts with the write token
 
 | Actor | Credential | Access |
 |---|---|---|
 | Training script | `TRACKIO_WRITE_TOKEN` / write-token URL | Full write, bypasses `TRACKIO_AUTH_REQUIRED` |
+| Training script | Personal API token (`trk_...`) | The owner's write access, attributed to the owner; bypasses `TRACKIO_AUTH_REQUIRED` |
 | Signed-in user with write permission | OIDC session cookie | Full write from the dashboard |
 | Signed-in user without write permission | OIDC session cookie | Read-only |
 | Anonymous visitor | none | Read-only, or nothing when `TRACKIO_AUTH_REQUIRED=1` |

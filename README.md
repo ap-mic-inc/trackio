@@ -261,7 +261,11 @@ runs need write access, which comes from one of:
    accounts created on the Admin page (which you open with the write-token
    link), or OIDC when it is configured (see
    [OIDC authentication](docs/source/oidc_auth.md)).
-3. **On Hugging Face Spaces**, signing in with a Hugging Face account that has
+3. **A personal API token** (`trk_...`), created by a signed-in user on the
+   Settings page. Use it in place of the write token in training jobs; runs
+   are attributed to that user and the token follows their role (see
+   [Personal API tokens](docs/source/oidc_auth.md#personal-api-tokens)).
+4. **On Hugging Face Spaces**, signing in with a Hugging Face account that has
    write access to the Space.
 
 How the token is sent:

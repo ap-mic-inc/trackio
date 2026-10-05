@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import {
     adminCreateUser,
+    adminRevokeUserTokens,
     adminGetAuthSettings,
     adminResetPassword,
     adminSetAuthSettings,
@@ -52,6 +53,21 @@
       error = e?.message ?? String(e);
     } finally {
       revoking = null;
+    }
+  }
+
+  let revokingTokens = $state(null);
+
+  async function revokeTokens(user) {
+    if (!window.confirm(`Revoke all ${user.api_tokens} API token(s) of ${displayName(user)}?`)) return;
+    revokingTokens = user.sub;
+    try {
+      await adminRevokeUserTokens(user.sub);
+      await refresh();
+    } catch (e) {
+      error = e?.message ?? String(e);
+    } finally {
+      revokingTokens = null;
     }
   }
 
@@ -317,6 +333,18 @@
                         Reset password
                       </button>
                     {/if}
+                    {#if user.api_tokens > 0}
+                      <button
+                        class="revoke-btn"
+                        disabled={revokingTokens === user.sub}
+                        onclick={(e) => {
+                          e.stopPropagation();
+                          revokeTokens(user);
+                        }}
+                      >
+                        {revokingTokens === user.sub ? "Revoking…" : "Revoke tokens"}
+                      </button>
+                    {/if}
                     {#if user.active_sessions > 0}
                       <button
                         class="revoke-btn"
@@ -338,6 +366,7 @@
                         <dl class="activity-stats">
                           <div><dt>Logins</dt><dd>{user.login_count ?? 0}</dd></div>
                           <div><dt>Active sessions</dt><dd>{user.active_sessions ?? 0}</dd></div>
+                          <div><dt>API tokens</dt><dd>{user.api_tokens ?? 0}</dd></div>
                           <div><dt>Projects</dt><dd>{user.projects.length}</dd></div>
                         </dl>
                         <p class="muted mono">sub: {user.sub}</p>
@@ -452,8 +481,9 @@
     <section>
       <h3>Write-token clients</h3>
       <p class="muted">
-        Projects written by scripts authenticating with the server write token
-        (no user identity).
+        Projects written by scripts authenticating with the shared server
+        write token (no user identity). Scripts using a personal API token
+        appear under their owner above.
       </p>
       {#if writeTokenProjects.length === 0}
         <p class="empty-state">No write-token activity recorded yet.</p>
@@ -583,7 +613,7 @@
   .badge-read { background: var(--subtle); color: var(--muted); border: 1px solid var(--line); }
   .badge-type { background: var(--subtle); color: var(--muted); margin-left: 6px; font-size: 10px; }
   .actions-cell { white-space: nowrap; }
-  .actions-cell .secondary-btn { margin-right: 6px; }
+  .actions-cell button + button { margin-left: 6px; }
   .admin-table .role-select { min-width: 135px; height: 31px; font-size: 12px; }
   .detail-row > td { padding: 16px; background: var(--subtle); }
   .detail { border-left: 2px solid var(--color-accent, #f97316); padding: 0 16px; }

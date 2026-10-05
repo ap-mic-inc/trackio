@@ -459,6 +459,65 @@ def _has_oidc_write_access(request: Request) -> bool:
     return session is not None and session.can_write
 
 
+def _presented_token(request: Request) -> str | None:
+    hdr = request.headers.get("x-trackio-write-token")
+    if hdr is not None:
+        return hdr
+    cookies = request.headers.get("cookie", "")
+    if cookies:
+        for cookie in cookies.split(";"):
+            parts = cookie.strip().split("=", 1)
+            if len(parts) == 2 and parts[0] == "trackio_write_token":
+                return parts[1]
+    if hasattr(request, "query_params") and request.query_params:
+        qp = request.query_params.get("write_token")
+        return qp if isinstance(qp, str) else None
+    return None
+
+
+def _api_token_user(request: Request) -> dict[str, Any] | None:
+    """The user behind a personal API token presented on the request (via
+    the same header, cookie, or query parameter as the server write token)."""
+    token = _presented_token(request)
+    if not isinstance(token, str) or not token.startswith(auth_store.API_TOKEN_PREFIX):
+        return None
+    return auth_store.resolve_api_token(token)
+
+
+def _has_api_token_write_access(request: Request) -> bool:
+    user = _api_token_user(request)
+    return user is not None and user["can_write"]
+
+
+def _has_server_access_token(request: Request) -> bool:
+    return (
+        check_write_access(request, write_token) or _api_token_user(request) is not None
+    )
+
+
+def _request_identity(request: Request) -> tuple[str, str] | None:
+    """(sub, username) of the person behind a write: the owner of a personal
+    API token, else the signed-in session. None for the shared write token."""
+    user = _api_token_user(request)
+    if user is not None:
+        username = user["username"] or user["email"] or user["name"] or user["sub"]
+        return user["sub"], username
+    session = oidc.get_oidc_session(request)
+    if session is not None:
+        username = session.username or session.email or session.name or session.sub
+        return session.sub, username
+    return None
+
+
+def _with_verified_username(request: Request, config: Any) -> Any:
+    if not isinstance(config, dict):
+        return config
+    identity = _request_identity(request)
+    if identity is None:
+        return config
+    return {**config, "_Username": identity[1]}
+
+
 def _is_admin(request: Request) -> bool:
     if check_write_access(request, write_token):
         return True
@@ -480,8 +539,8 @@ def _record_write_activity(request: Request, projects: Any, action: str) -> None
         return
     if isinstance(projects, str):
         projects = [projects]
-    session = oidc.get_oidc_session(request)
-    actor = session.sub if session is not None else auth_store.WRITE_TOKEN_ACTOR
+    identity = _request_identity(request)
+    actor = identity[0] if identity is not None else auth_store.WRITE_TOKEN_ACTOR
     try:
         for project in {p for p in projects if p}:
             auth_store.record_activity(actor, project, action)
@@ -497,6 +556,8 @@ def assert_can_write_metrics(request: Request, hf_token: str | None) -> None:
             return
         if _has_oidc_write_access(request):
             return
+        if _has_api_token_write_access(request):
+            return
         raise TrackioAPIError(
             "A write_token is required to log metrics or upload to this server. "
             "Use the write-access URL from trackio.show(), set TRACKIO_WRITE_TOKEN, "
@@ -509,6 +570,8 @@ def assert_can_stage_upload(request: Request) -> None:
         if check_write_access(request, write_token):
             return
         if _has_oidc_write_access(request):
+            return
+        if _has_api_token_write_access(request):
             return
         raise TrackioAPIError(
             "A write_token is required to upload files to this server. "
@@ -546,6 +609,8 @@ def assert_can_mutate_runs(request: Request) -> None:
             return
         if _has_oidc_write_access(request):
             return
+        if _has_api_token_write_access(request):
+            return
         raise TrackioAPIError(
             "A write_token is required to delete or rename runs or dismiss alerts. "
             "Open the dashboard using the link that includes the write_token "
@@ -581,6 +646,22 @@ def get_run_mutation_status(request: Request) -> dict[str, Any]:
                 "login_enabled": True,
                 "user": user,
                 "admin": True,
+                "session": session is not None,
+            }
+        token_user = _api_token_user(request)
+        if session is None and token_user is not None:
+            return {
+                "spaces": False,
+                "allowed": token_user["can_write"],
+                "auth": "oidc" if token_user["can_write"] else "oidc_insufficient",
+                "oidc_enabled": oidc_on,
+                "login_enabled": True,
+                "user": token_user["name"]
+                or token_user["username"]
+                or token_user["email"]
+                or token_user["sub"],
+                "admin": admin,
+                "session": False,
             }
         if session is not None:
             return {
@@ -591,6 +672,7 @@ def get_run_mutation_status(request: Request) -> dict[str, Any]:
                 "login_enabled": True,
                 "user": user,
                 "admin": admin,
+                "session": True,
             }
         return {
             "spaces": False,
@@ -601,6 +683,7 @@ def get_run_mutation_status(request: Request) -> dict[str, Any]:
             "setup_available": local_auth.setup_available(),
             "user": None,
             "admin": False,
+            "session": False,
         }
     hf_tok = _hf_access_token(request)
     if hf_tok is not None:
@@ -926,7 +1009,9 @@ def bulk_log(
         logs_by_run[key]["timestamps"].append(log_entry.get("timestamp"))
         logs_by_run[key]["log_ids"].append(log_entry.get("log_id"))
         if log_entry.get("config") and logs_by_run[key]["config"] is None:
-            logs_by_run[key]["config"] = log_entry["config"]
+            logs_by_run[key]["config"] = _with_verified_username(
+                request, log_entry["config"]
+            )
         if log_entry.get("replace"):
             logs_by_run[key]["replace"] = True
 
@@ -972,7 +1057,9 @@ def bulk_log_system(
         logs_by_run[key]["timestamps"].append(log_entry.get("timestamp"))
         logs_by_run[key]["log_ids"].append(log_entry.get("log_id"))
         if log_entry.get("config") and logs_by_run[key]["config"] is None:
-            logs_by_run[key]["config"] = log_entry["config"]
+            logs_by_run[key]["config"] = _with_verified_username(
+                request, log_entry["config"]
+            )
 
     for (project, run, run_id), data in logs_by_run.items():
         has_log_ids = any(lid is not None for lid in data["log_ids"])
@@ -1610,6 +1697,56 @@ def admin_test_oidc(request: Request, issuer: str | None = None) -> dict[str, An
     }
 
 
+def _require_session(request: Request) -> oidc.OidcSession:
+    if on_spaces():
+        raise TrackioAPIError(
+            "Personal API tokens are only available on self-hosted servers."
+        )
+    session = oidc.get_oidc_session(request)
+    if session is None:
+        raise TrackioAPIError("Sign in to manage personal API tokens.")
+    return session
+
+
+def get_my_api_tokens(request: Request) -> dict[str, Any]:
+    """List the signed-in user's personal API tokens (metadata only)."""
+    session = _require_session(request)
+    return {
+        "user": session.display_name,
+        "can_write": session.can_write,
+        "tokens": auth_store.list_api_tokens(session.sub),
+    }
+
+
+def create_my_api_token(request: Request, name: str | None = None) -> dict[str, Any]:
+    """Create a personal API token for the signed-in user. The token is
+    returned once; it carries the user's current permissions and attributes
+    every write it makes to that user."""
+    session = _require_session(request)
+    label = (name or "").strip() or "token"
+    if len(label) > 64:
+        raise TrackioAPIError("Token name must be at most 64 characters.")
+    created = auth_store.create_api_token(session.sub, label)
+    if created is None:
+        raise TrackioAPIError("Failed to create the API token.")
+    token, meta = created
+    return {"token": token, **meta}
+
+
+def revoke_my_api_token(request: Request, token_id: str) -> dict[str, Any]:
+    """Revoke one of the signed-in user's personal API tokens."""
+    session = _require_session(request)
+    if not auth_store.delete_api_token(session.sub, token_id):
+        raise TrackioAPIError(f"Unknown API token: {token_id!r}")
+    return {"revoked": token_id}
+
+
+def admin_revoke_user_tokens(request: Request, sub: str) -> dict[str, Any]:
+    """Revoke every personal API token of a user. Admin only."""
+    assert_is_admin(request)
+    return {"revoked": auth_store.delete_api_tokens_for_sub(sub)}
+
+
 def admin_set_role(request: Request, sub: str, role: str) -> dict[str, Any]:
     """Assign a role override to a user: admin, write, read, or default
     (fall back to the environment-configured permissions). Takes effect
@@ -1699,6 +1836,10 @@ def _api_registry() -> dict[str, Any]:
         "admin_get_auth_settings": admin_get_auth_settings,
         "admin_set_auth_settings": admin_set_auth_settings,
         "admin_test_oidc": admin_test_oidc,
+        "admin_revoke_user_tokens": admin_revoke_user_tokens,
+        "get_my_api_tokens": get_my_api_tokens,
+        "create_my_api_token": create_my_api_token,
+        "revoke_my_api_token": revoke_my_api_token,
     }
 
 
@@ -1761,7 +1902,7 @@ def build_starlette_app_only(
     starlette_app.add_middleware(CompressionMiddleware)
     starlette_app.add_middleware(
         oidc.OidcAuthRequiredMiddleware,
-        write_token_checker=lambda req: check_write_access(req, write_token),
+        write_token_checker=_has_server_access_token,
     )
     start_inbox_poller()
     return starlette_app, write_token

@@ -8,8 +8,10 @@ survives server restarts (unlike the in-memory session cache it backs).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import secrets
 import sqlite3
 import threading
 import time
@@ -30,6 +32,12 @@ _last_activity_write: dict[tuple[str, str, str], float] = {}
 
 _SETTINGS_CACHE_TTL = 5.0
 _settings_cache: dict[str, tuple[Any, float]] = {}
+
+API_TOKEN_PREFIX = "trk_"
+_API_TOKEN_CACHE_TTL = 10.0
+_API_TOKEN_TOUCH_INTERVAL = 60.0
+_api_token_cache: dict[str, tuple[dict[str, Any] | None, float]] = {}
+_api_token_last_touch: dict[str, float] = {}
 
 
 def _db_path() -> Path:
@@ -91,6 +99,20 @@ def _connect() -> sqlite3.Connection:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS api_tokens (
+            id TEXT PRIMARY KEY,
+            sub TEXT NOT NULL,
+            name TEXT NOT NULL,
+            token_hash TEXT NOT NULL UNIQUE,
+            hint TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            last_used_at TEXT
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS api_tokens_sub ON api_tokens (sub)")
     return conn
 
 
@@ -310,6 +332,7 @@ def update_user_permissions(sub: str, can_write: bool, is_admin: bool) -> None:
                 "UPDATE users SET can_write = ?, is_admin = ? WHERE sub = ?",
                 (int(can_write), int(is_admin), sub),
             )
+            _api_token_cache.clear()
     except sqlite3.Error as e:
         logger.warning("failed to update permissions for %s: %s", sub, e)
 
@@ -395,6 +418,131 @@ def delete_sessions_for_sub(sub: str) -> list[str]:
         return []
 
 
+def hash_api_token(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def _api_token_row(row: tuple) -> dict[str, Any]:
+    return {
+        "id": row[0],
+        "name": row[1],
+        "hint": row[2],
+        "created_at": row[3],
+        "last_used_at": row[4],
+    }
+
+
+def create_api_token(sub: str, name: str) -> tuple[str, dict[str, Any]] | None:
+    """Mint a personal API token for ``sub``. Returns the plaintext token
+    (shown to the user once; only its hash is stored) and its metadata, or
+    None on a database error."""
+    token = API_TOKEN_PREFIX + secrets.token_urlsafe(32)
+    token_id = secrets.token_hex(8)
+    hint = token[-4:]
+    now = _now_iso()
+    try:
+        with _lock, _connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO api_tokens (id, sub, name, token_hash, hint, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (token_id, sub, name, hash_api_token(token), hint, now),
+            )
+    except sqlite3.Error as e:
+        logger.warning("failed to create API token for %s: %s", sub, e)
+        return None
+    return token, _api_token_row((token_id, name, hint, now, None))
+
+
+def list_api_tokens(sub: str) -> list[dict[str, Any]]:
+    try:
+        with _lock, _connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, name, hint, created_at, last_used_at
+                FROM api_tokens WHERE sub = ? ORDER BY created_at DESC
+                """,
+                (sub,),
+            ).fetchall()
+    except sqlite3.Error as e:
+        logger.warning("failed to list API tokens for %s: %s", sub, e)
+        return []
+    return [_api_token_row(row) for row in rows]
+
+
+def delete_api_token(sub: str, token_id: str) -> bool:
+    try:
+        with _lock, _connect() as conn:
+            cursor = conn.execute(
+                "DELETE FROM api_tokens WHERE id = ? AND sub = ?", (token_id, sub)
+            )
+            _api_token_cache.clear()
+            return cursor.rowcount > 0
+    except sqlite3.Error as e:
+        logger.warning("failed to delete API token %s: %s", token_id, e)
+        return False
+
+
+def delete_api_tokens_for_sub(sub: str) -> int:
+    try:
+        with _lock, _connect() as conn:
+            cursor = conn.execute("DELETE FROM api_tokens WHERE sub = ?", (sub,))
+            _api_token_cache.clear()
+            return cursor.rowcount
+    except sqlite3.Error as e:
+        logger.warning("failed to delete API tokens for %s: %s", sub, e)
+        return 0
+
+
+def resolve_api_token(token: str) -> dict[str, Any] | None:
+    """Return the user owning a personal API token, with permissions read
+    from the users table, or None when the token is unknown or revoked.
+    Lookups are cached briefly since this runs on the request path; revoking
+    a token or changing a user's permissions clears the cache."""
+    token_hash = hash_api_token(token)
+    now = time.monotonic()
+    with _lock:
+        cached = _api_token_cache.get(token_hash)
+    if cached is not None and now - cached[1] < _API_TOKEN_CACHE_TTL:
+        return cached[0]
+    user: dict[str, Any] | None = None
+    try:
+        with _lock, _connect() as conn:
+            row = conn.execute(
+                """
+                SELECT t.id, u.sub, u.email, u.name, u.username,
+                       u.can_write, u.is_admin
+                FROM api_tokens t JOIN users u ON u.sub = t.sub
+                WHERE t.token_hash = ?
+                """,
+                (token_hash,),
+            ).fetchone()
+            if row is not None:
+                user = {
+                    "token_id": row[0],
+                    "sub": row[1],
+                    "email": row[2],
+                    "name": row[3],
+                    "username": row[4],
+                    "can_write": bool(row[5]),
+                    "is_admin": bool(row[6]),
+                }
+                last_touch = _api_token_last_touch.get(row[0])
+                if last_touch is None or now - last_touch > _API_TOKEN_TOUCH_INTERVAL:
+                    _api_token_last_touch[row[0]] = now
+                    conn.execute(
+                        "UPDATE api_tokens SET last_used_at = ? WHERE id = ?",
+                        (_now_iso(), row[0]),
+                    )
+    except sqlite3.Error as e:
+        logger.warning("failed to resolve API token: %s", e)
+        return None
+    with _lock:
+        _api_token_cache[token_hash] = (user, now)
+    return user
+
+
 def record_activity(actor: str, project: str, action: str) -> None:
     """Upsert an (actor, project, action) counter. High-frequency actions
     (per-step logging) are throttled to one database write per minute per
@@ -437,6 +585,11 @@ def list_users() -> list[dict[str, Any]]:
             session_counts = dict(
                 conn.execute(
                     "SELECT sub, COUNT(*) FROM sessions GROUP BY sub"
+                ).fetchall()
+            )
+            token_counts = dict(
+                conn.execute(
+                    "SELECT sub, COUNT(*) FROM api_tokens GROUP BY sub"
                 ).fetchall()
             )
             project_rows = conn.execute(
@@ -486,6 +639,7 @@ def list_users() -> list[dict[str, Any]]:
                 "role_override": row[10],
                 "auth_type": "local" if is_local_sub(sub) else "oidc",
                 "active_sessions": session_counts.get(sub, 0),
+                "api_tokens": token_counts.get(sub, 0),
                 "projects": sorted(
                     projects_by_actor.get(sub, {}).values(),
                     key=lambda p: p["last_seen"] or "",

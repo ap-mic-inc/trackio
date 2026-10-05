@@ -352,6 +352,26 @@ export async function adminTestOidc(issuer) {
   return await callApi("/admin_test_oidc", { issuer });
 }
 
+export async function adminRevokeUserTokens(sub) {
+  return await callApi("/admin_revoke_user_tokens", { sub });
+}
+
+export async function getMyApiTokens() {
+  return await callApi("/get_my_api_tokens", {});
+}
+
+export async function createMyApiToken(name) {
+  return await callApi("/create_my_api_token", { name });
+}
+
+export async function revokeMyApiToken(tokenId) {
+  return await callApi("/revoke_my_api_token", { token_id: tokenId });
+}
+
+export function getApiBase() {
+  return BASE;
+}
+
 export async function deleteRun(project, run) {
   const params = { project, ...normalizeRun(run) };
   if (await isStaticMode()) return staticApi.deleteRun(project, run);
