@@ -48,12 +48,21 @@ class _FakeDist:
 
 def test_git_revision_not_a_checkout(monkeypatch, tmp_path):
     monkeypatch.setattr(build_info, "_REPO_ROOT", tmp_path)
+    monkeypatch.delenv("TRACKIO_GIT_REVISION", raising=False)
     monkeypatch.setattr(
         build_info.metadata, "distribution", lambda name: _FakeDist(None)
     )
     build_info.git_revision.cache_clear()
     assert build_info.git_revision() is None
     assert build_info.version_string("1.2.3") == "1.2.3"
+    build_info.git_revision.cache_clear()
+
+
+def test_git_revision_from_env_without_checkout(monkeypatch, tmp_path):
+    monkeypatch.setattr(build_info, "_REPO_ROOT", tmp_path)
+    monkeypatch.setenv("TRACKIO_GIT_REVISION", "e0a61c9d726b3be1c754a")
+    build_info.git_revision.cache_clear()
+    assert build_info.git_revision() == "e0a61c9"
     build_info.git_revision.cache_clear()
 
 

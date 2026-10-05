@@ -3,6 +3,7 @@
 import functools
 import hashlib
 import json
+import os
 import subprocess
 from importlib import metadata
 from pathlib import Path
@@ -24,6 +25,9 @@ def _git(*args: str) -> bytes | None:
 
 
 def _installed_revision() -> str | None:
+    commit = os.environ.get("TRACKIO_GIT_REVISION", "").strip()
+    if commit:
+        return commit[:7]
     try:
         text = metadata.distribution("trackio").read_text("direct_url.json")
         commit = json.loads(text or "{}").get("vcs_info", {}).get("commit_id")
@@ -41,7 +45,9 @@ def git_revision() -> str | None:
     working tree gets a distinct revision. Installs made with
     ``pip install "trackio @ git+https://...@<branch>"`` have no checkout;
     for those the commit recorded by the installer (PEP 610
-    ``direct_url.json``) is used. Returns None for other installs.
+    ``direct_url.json``) is used. Docker images, which have no checkout
+    either, set ``TRACKIO_GIT_REVISION`` at build time. Returns None for
+    other installs.
     Computed once per process, so a running server reports the code it
     was started with.
     """

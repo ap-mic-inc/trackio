@@ -1,0 +1,12 @@
+.git
+.venv
+**/__pycache__
+**/node_modules
+trackio/frontend/dist
+tests
+docs
+examples
+plans
+autonomous-experiments
+contrib
+*.db
