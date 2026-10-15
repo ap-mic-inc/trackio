@@ -7,7 +7,7 @@ import shutil
 import sqlite3
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -67,6 +67,7 @@ _SQL_IN_CHUNK = 500
 _READ_ONLY_PRAGMAS = frozenset(
     {"table_info", "table_xinfo", "index_list", "index_info", "index_xinfo"}
 )
+_READ_ONLY_VALUE_PRAGMAS = frozenset({"user_version"})
 SEARCHABLE_SPAN_FIELDS = ("id", "name", "kind", "model", "status", "error", "metadata")
 TRACE_PAYLOAD_TYPE = "trackio.trace"
 
@@ -227,8 +228,11 @@ class ProcessLock:
             self.lockfile.close()
 
 
-_LOGS_READ_CACHE: dict[tuple[Any, ...], tuple[int, list[dict[str, Any]]]] = {}
+_LOGS_READ_CACHE: dict[
+    tuple[Any, ...], tuple[tuple[int, int], list[dict[str, Any]]]
+] = {}
 _LOGS_READ_CACHE_LOCK = Lock()
+_DB_WRITE_GENERATIONS: dict[str, int] = {}
 _LOGS_READ_CACHE_MAX_KEYS = 512
 _LOGS_READ_CACHE_MAX_ROWS_PER_ENTRY = 4000
 _METRIC_BUDGET_REFINEMENT_PASSES = 4
@@ -255,6 +259,20 @@ def _sqlite_db_invalidation_mtime_ns(db_path: Path) -> int | None:
     return m
 
 
+def _bump_db_write_generation(db_path: Path) -> None:
+    key = str(db_path)
+    with _LOGS_READ_CACHE_LOCK:
+        _DB_WRITE_GENERATIONS[key] = _DB_WRITE_GENERATIONS.get(key, 0) + 1
+
+
+def _logs_read_cache_token(db_path: Path) -> tuple[int, int] | None:
+    mtime_ns = _sqlite_db_invalidation_mtime_ns(db_path)
+    if mtime_ns is None:
+        return None
+    with _LOGS_READ_CACHE_LOCK:
+        return mtime_ns, _DB_WRITE_GENERATIONS.get(str(db_path), 0)
+
+
 def _logs_read_cache_key(
     project: str,
     run: str | None,
@@ -277,15 +295,15 @@ def _logs_read_cache_get(
 ) -> list[dict[str, Any]] | None:
     if not _spaces_logs_read_cache_enabled():
         return None
-    mtime_ns = _sqlite_db_invalidation_mtime_ns(db_path)
-    if mtime_ns is None:
+    token = _logs_read_cache_token(db_path)
+    if token is None:
         return None
     with _LOGS_READ_CACHE_LOCK:
         item = _LOGS_READ_CACHE.get(key)
         if item is None:
             return None
-        cached_mtime, logs = item
-        if cached_mtime != mtime_ns:
+        cached_token, logs = item
+        if cached_token != token:
             del _LOGS_READ_CACHE[key]
             return None
     return [{**d} for d in logs]
@@ -298,17 +316,19 @@ def _logs_read_cache_put(
         return
     if len(logs) > _LOGS_READ_CACHE_MAX_ROWS_PER_ENTRY:
         return
-    mtime_ns = _sqlite_db_invalidation_mtime_ns(db_path)
-    if mtime_ns is None:
+    token = _logs_read_cache_token(db_path)
+    if token is None:
         return
     snapshot = [{**d} for d in logs]
     with _LOGS_READ_CACHE_LOCK:
         while len(_LOGS_READ_CACHE) >= _LOGS_READ_CACHE_MAX_KEYS:
             _LOGS_READ_CACHE.pop(next(iter(_LOGS_READ_CACHE)))
-        _LOGS_READ_CACHE[key] = (mtime_ns, snapshot)
+        _LOGS_READ_CACHE[key] = (token, snapshot)
 
 
-_SYSTEM_LOGS_READ_CACHE: dict[tuple[Any, ...], tuple[int, list[dict[str, Any]]]] = {}
+_SYSTEM_LOGS_READ_CACHE: dict[
+    tuple[Any, ...], tuple[tuple[int, int], list[dict[str, Any]]]
+] = {}
 
 
 def _system_logs_read_cache_key(
@@ -331,15 +351,15 @@ def _system_logs_read_cache_get(
 ) -> list[dict[str, Any]] | None:
     if not _spaces_logs_read_cache_enabled():
         return None
-    mtime_ns = _sqlite_db_invalidation_mtime_ns(db_path)
-    if mtime_ns is None:
+    token = _logs_read_cache_token(db_path)
+    if token is None:
         return None
     with _LOGS_READ_CACHE_LOCK:
         item = _SYSTEM_LOGS_READ_CACHE.get(key)
         if item is None:
             return None
-        cached_mtime, logs = item
-        if cached_mtime != mtime_ns:
+        cached_token, logs = item
+        if cached_token != token:
             del _SYSTEM_LOGS_READ_CACHE[key]
             return None
     return [{**d} for d in logs]
@@ -352,14 +372,169 @@ def _system_logs_read_cache_put(
         return
     if len(logs) > _LOGS_READ_CACHE_MAX_ROWS_PER_ENTRY:
         return
-    mtime_ns = _sqlite_db_invalidation_mtime_ns(db_path)
-    if mtime_ns is None:
+    token = _logs_read_cache_token(db_path)
+    if token is None:
         return
     snapshot = [{**d} for d in logs]
     with _LOGS_READ_CACHE_LOCK:
         while len(_SYSTEM_LOGS_READ_CACHE) >= _LOGS_READ_CACHE_MAX_KEYS:
             _SYSTEM_LOGS_READ_CACHE.pop(next(iter(_SYSTEM_LOGS_READ_CACHE)))
-        _SYSTEM_LOGS_READ_CACHE[key] = (mtime_ns, snapshot)
+        _SYSTEM_LOGS_READ_CACHE[key] = (token, snapshot)
+
+
+_RUN_ID_TABLES = {
+    "metrics": (
+        """
+        CREATE TABLE metrics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id TEXT NOT NULL,
+            timestamp TEXT NOT NULL,
+            run_name TEXT NOT NULL,
+            step INTEGER NOT NULL,
+            metrics TEXT NOT NULL,
+            log_id TEXT,
+            space_id TEXT
+        )
+        """,
+        (
+            "CREATE INDEX idx_metrics_run_step ON metrics(run_id, step)",
+            "CREATE INDEX idx_metrics_run_timestamp ON metrics(run_id, timestamp)",
+            "CREATE UNIQUE INDEX idx_metrics_log_id ON metrics(log_id) "
+            "WHERE log_id IS NOT NULL",
+            "CREATE INDEX idx_metrics_pending ON metrics(space_id) "
+            "WHERE space_id IS NOT NULL",
+        ),
+    ),
+    "configs": (
+        """
+        CREATE TABLE configs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id TEXT NOT NULL,
+            run_name TEXT NOT NULL,
+            config TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE(run_id)
+        )
+        """,
+        ("CREATE INDEX idx_configs_run_name ON configs(run_name)",),
+    ),
+    "system_metrics": (
+        """
+        CREATE TABLE system_metrics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id TEXT NOT NULL,
+            timestamp TEXT NOT NULL,
+            run_name TEXT NOT NULL,
+            metrics TEXT NOT NULL,
+            log_id TEXT,
+            space_id TEXT
+        )
+        """,
+        (
+            "CREATE INDEX idx_system_metrics_run_timestamp "
+            "ON system_metrics(run_id, timestamp)",
+            "CREATE UNIQUE INDEX idx_system_metrics_log_id ON system_metrics(log_id) "
+            "WHERE log_id IS NOT NULL",
+            "CREATE INDEX idx_system_metrics_pending ON system_metrics(space_id) "
+            "WHERE space_id IS NOT NULL",
+        ),
+    ),
+    "alerts": (
+        """
+        CREATE TABLE alerts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id TEXT NOT NULL,
+            timestamp TEXT NOT NULL,
+            run_name TEXT NOT NULL,
+            title TEXT NOT NULL,
+            text TEXT,
+            level TEXT NOT NULL DEFAULT 'warn',
+            step INTEGER,
+            alert_id TEXT,
+            dismissed_at TEXT
+        )
+        """,
+        (
+            "CREATE INDEX idx_alerts_run ON alerts(run_id)",
+            "CREATE INDEX idx_alerts_timestamp ON alerts(timestamp)",
+            "CREATE UNIQUE INDEX idx_alerts_alert_id ON alerts(alert_id) "
+            "WHERE alert_id IS NOT NULL",
+        ),
+    ),
+}
+
+
+def _migrate_add_run_ids(cursor: sqlite3.Cursor) -> None:
+    """
+    Schema version 2: gives databases written before Trackio 0.24 a `run_id` on
+    every run-scoped table. Those versions identified a run only by its name, so
+    each distinct run name becomes one run with a new id, shared across tables.
+    Tables that lack `run_id` are rebuilt with their version 2 definition and
+    indexes, keeping every row and its original primary key.
+    """
+    legacy = [
+        table
+        for table in (*_RUN_ID_TABLES, "pending_uploads")
+        if (columns := SQLiteStorage._table_columns(cursor.connection, table))
+        and "run_id" not in columns
+    ]
+    if not legacy:
+        return
+
+    cursor.execute(
+        "CREATE TEMP TABLE trackio_run_ids (run_name TEXT PRIMARY KEY, run_id TEXT)"
+    )
+    for table in _RUN_ID_TABLES:
+        columns = SQLiteStorage._table_columns(cursor.connection, table)
+        if table in legacy or not columns:
+            continue
+        order = " ORDER BY timestamp DESC" if "timestamp" in columns else ""
+        cursor.execute(
+            "INSERT OR IGNORE INTO trackio_run_ids "
+            f"SELECT run_name, run_id FROM {table}{order}"
+        )
+    for table in legacy:
+        for (run_name,) in cursor.execute(
+            f"SELECT DISTINCT run_name FROM {table} WHERE run_name IS NOT NULL"
+        ).fetchall():
+            cursor.execute(
+                "INSERT OR IGNORE INTO trackio_run_ids VALUES (?, ?)",
+                (run_name, uuid.uuid4().hex),
+            )
+
+    for table in legacy:
+        if table == "pending_uploads":
+            cursor.execute("ALTER TABLE pending_uploads ADD COLUMN run_id TEXT")
+            cursor.execute(
+                "UPDATE pending_uploads SET run_id = (SELECT run_id FROM "
+                "trackio_run_ids WHERE trackio_run_ids.run_name = "
+                "pending_uploads.run_name)"
+            )
+            continue
+        create_table, indexes = _RUN_ID_TABLES[table]
+        cursor.execute(f"ALTER TABLE {table} RENAME TO trackio_legacy_{table}")
+        cursor.execute(create_table)
+        copied = sorted(
+            SQLiteStorage._table_columns(cursor.connection, f"trackio_legacy_{table}")
+            & SQLiteStorage._table_columns(cursor.connection, table)
+        )
+        column_list = ", ".join(copied)
+        source_list = ", ".join(f"legacy.{column}" for column in copied)
+        cursor.execute(
+            f"INSERT INTO {table} ({column_list}, run_id) "
+            f"SELECT {source_list}, ids.run_id FROM trackio_legacy_{table} AS legacy "
+            "JOIN trackio_run_ids AS ids ON ids.run_name = legacy.run_name"
+        )
+        cursor.execute(f"DROP TABLE trackio_legacy_{table}")
+        for index in indexes:
+            cursor.execute(index)
+    cursor.execute("DROP TABLE trackio_run_ids")
+
+
+SCHEMA_VERSION = 2
+_SCHEMA_MIGRATIONS: dict[int, Callable[[sqlite3.Cursor], None]] = {
+    2: _migrate_add_run_ids,
+}
 
 
 class SQLiteStorage:
@@ -428,8 +603,13 @@ class SQLiteStorage:
             try:
                 conn = _get_or_create_persistent_conn(db_path, timeout=timeout)
                 conn.row_factory = row_factory
-                with conn:
-                    yield conn
+                changes_before = conn.total_changes
+                try:
+                    with conn:
+                        yield conn
+                finally:
+                    if conn.total_changes != changes_before:
+                        _bump_db_write_generation(db_path)
             finally:
                 access_lock.release()
         else:
@@ -829,8 +1009,62 @@ class SQLiteStorage:
                         ON {table}(space_id) WHERE space_id IS NOT NULL"""
                     )
 
+                SQLiteStorage._apply_schema_migrations(cursor)
+                for table in ("metrics", "system_metrics"):
+                    if SQLiteStorage._supports_run_ids(conn, table):
+                        cursor.execute(
+                            f"""CREATE INDEX IF NOT EXISTS idx_{table}_run_record
+                            ON {table}(run_id, run_name, timestamp)"""
+                        )
+
                 conn.commit()
         return db_path
+
+    @staticmethod
+    def _apply_schema_migrations(cursor: sqlite3.Cursor) -> None:
+        """
+        Upgrades a database to `SCHEMA_VERSION`, recorded in `PRAGMA user_version`.
+
+        Version 1 is the schema `init_db()` creates; databases written before
+        versioning existed report version 0 and reach version 1 through the
+        idempotent statements above. `_SCHEMA_MIGRATIONS[n]` upgrades a database
+        from version `n - 1` to `n`, for every `n` from 2 to `SCHEMA_VERSION`. Each
+        step runs in its own savepoint together with its version bump, so a failed
+        step leaves the database at the last version that completed. Databases
+        already at a newer version than this Trackio knows are left untouched.
+        """
+        version = cursor.execute("PRAGMA user_version").fetchone()[0]
+        if version >= SCHEMA_VERSION:
+            return
+        if version < 1:
+            cursor.execute("PRAGMA user_version = 1")
+            version = 1
+        for target in range(version + 1, SCHEMA_VERSION + 1):
+            cursor.execute("SAVEPOINT trackio_schema_migration")
+            try:
+                _SCHEMA_MIGRATIONS[target](cursor)
+                cursor.execute(f"PRAGMA user_version = {target}")
+            except BaseException:
+                cursor.execute("ROLLBACK TO trackio_schema_migration")
+                cursor.execute("RELEASE trackio_schema_migration")
+                raise
+            cursor.execute("RELEASE trackio_schema_migration")
+
+    @staticmethod
+    def migrate_all_projects() -> None:
+        """
+        Brings every project database in `TRACKIO_DIR` to `SCHEMA_VERSION`, so a
+        server never reads a project in an older schema, even one nobody writes to.
+        Raises if any project cannot be migrated, so the server does not start.
+        """
+        for project in SQLiteStorage.get_projects():
+            try:
+                SQLiteStorage.init_db(project)
+            except Exception as e:
+                raise RuntimeError(
+                    f"Could not migrate project '{project}' to schema version "
+                    f"{SCHEMA_VERSION}: {e}"
+                ) from e
 
     @staticmethod
     def _require_pyarrow():
@@ -958,17 +1192,50 @@ class SQLiteStorage:
                     ]
                 has_system = bool(SQLiteStorage._table_columns(conn, "system_metrics"))
                 if SQLiteStorage._supports_run_ids(conn):
-                    run_tables = ["metrics"]
+                    # Seek to the first row of each run instead of aggregating
+                    # every logged value. Keep the scan fallback for downloaded or
+                    # read-only databases that have not passed through init_db.
+                    # Runs that only log system metrics come from system_metrics.
+                    run_tables = {"metric_runs": "metrics"}
                     if has_system and SQLiteStorage._supports_run_ids(
                         conn, "system_metrics"
                     ):
-                        run_tables.append("system_metrics")
+                        run_tables["system_runs"] = "system_metrics"
+                    run_ctes = []
+                    for cte, table in run_tables.items():
+                        has_record_index = cursor.execute(
+                            "SELECT 1 FROM sqlite_master WHERE type = 'index' "
+                            "AND name = ?",
+                            (f"idx_{table}_run_record",),
+                        ).fetchone()
+                        first_rows = f"SELECT run_id, run_name, timestamp FROM {table}"
+                        if has_record_index:
+                            first_rows = f"""
+                                SELECT run_id, run_name, timestamp FROM {table}
+                                WHERE id = (
+                                    SELECT id FROM {table}
+                                    ORDER BY run_id, run_name, timestamp LIMIT 1
+                                )
+                                UNION ALL
+                                SELECT m.run_id, m.run_name, m.timestamp
+                                FROM {cte} AS previous
+                                JOIN {table} AS m ON m.id = COALESCE(
+                                    (SELECT id FROM {table}
+                                     WHERE run_id = previous.run_id
+                                       AND run_name > previous.run_name
+                                     ORDER BY run_name, timestamp LIMIT 1),
+                                    (SELECT id FROM {table}
+                                     WHERE run_id > previous.run_id
+                                     ORDER BY run_id, run_name, timestamp LIMIT 1)
+                                )
+                            """
+                        run_ctes.append(f"{cte} AS ({first_rows})")
                     known_runs = " UNION ALL ".join(
-                        f"SELECT run_id, run_name FROM {table}" for table in run_tables
+                        f"SELECT run_id, run_name FROM {cte}" for cte in run_tables
                     )
                     sources = [
-                        f"SELECT run_id, run_name, timestamp AS created_at FROM {table}"
-                        for table in run_tables
+                        f"SELECT run_id, run_name, timestamp AS created_at FROM {cte}"
+                        for cte in run_tables
                     ]
                     if has_links:
                         sources.append(
@@ -999,6 +1266,7 @@ class SQLiteStorage:
                         )
                     cursor.execute(
                         f"""
+                        WITH RECURSIVE {", ".join(run_ctes)}
                         SELECT run_id, run_name, MIN(created_at) AS created_at
                         FROM ({" UNION ALL ".join(sources)})
                         GROUP BY run_id, run_name
@@ -2337,12 +2605,12 @@ class SQLiteStorage:
                     logs = SQLiteStorage._fetch_system_logs_with_cursor(
                         cursor, run_identity, max_points
                     )
+                _system_logs_read_cache_put(db_path, cache_key, logs)
         except sqlite3.OperationalError as e:
             if "no such table: system_metrics" in str(e):
                 return []
             raise
 
-        _system_logs_read_cache_put(db_path, cache_key, logs)
         return [{**d} for d in logs]
 
     @staticmethod
@@ -2770,12 +3038,12 @@ class SQLiteStorage:
                     logs = SQLiteStorage._fetch_metric_logs_with_cursor(
                         cursor, run_identity, max_points, scalar_only=scalar_only
                     )
+                _logs_read_cache_put(db_path, cache_key, logs)
         except sqlite3.OperationalError as e:
             if "no such table: metrics" in str(e):
                 return []
             raise
 
-        _logs_read_cache_put(db_path, cache_key, logs)
         return [{**d} for d in logs]
 
     @staticmethod
@@ -3353,7 +3621,7 @@ class SQLiteStorage:
         db_name: str | None,
         source: str | None,
     ) -> int:
-        del arg2, db_name, source
+        del db_name, source
         if action_code in {
             sqlite3.SQLITE_SELECT,
             sqlite3.SQLITE_READ,
@@ -3364,6 +3632,8 @@ class SQLiteStorage:
         if action_code == pragma_code:
             pragma_name = (arg1 or "").lower()
             if pragma_name in _READ_ONLY_PRAGMAS:
+                return sqlite3.SQLITE_OK
+            if pragma_name in _READ_ONLY_VALUE_PRAGMAS and arg2 is None:
                 return sqlite3.SQLITE_OK
         return sqlite3.SQLITE_DENY
 

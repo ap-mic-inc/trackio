@@ -23,6 +23,203 @@ def test_init_creates_metrics_table(temp_dir):
         cursor.execute("SELECT * FROM metrics")
 
 
+def _user_version(db_path):
+    with sqlite3.connect(db_path) as conn:
+        return conn.execute("PRAGMA user_version").fetchone()[0]
+
+
+def _set_user_version(db_path, version):
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(f"PRAGMA user_version = {version}")
+
+
+def _register_migrations(monkeypatch, migrations):
+    monkeypatch.setattr(trackio.sqlite_storage, "_SCHEMA_MIGRATIONS", migrations)
+    monkeypatch.setattr(trackio.sqlite_storage, "SCHEMA_VERSION", 1 + len(migrations))
+
+
+def test_schema_migrations_upgrade_legacy_database_once_in_order(temp_dir, monkeypatch):
+    SQLiteStorage.bulk_log("proj", "run", [{"loss": 1.0}, {"loss": 0.5}])
+    db_path = SQLiteStorage.get_project_db_path("proj")
+    _set_user_version(db_path, 0)
+    applied = []
+
+    def add_loss_column(cursor):
+        applied.append(2)
+        cursor.execute("ALTER TABLE metrics ADD COLUMN loss REAL")
+
+    def backfill_loss(cursor):
+        applied.append(3)
+        cursor.execute("UPDATE metrics SET loss = json_extract(metrics, '$.loss')")
+
+    _register_migrations(monkeypatch, {2: add_loss_column, 3: backfill_loss})
+    SQLiteStorage.init_db("proj")
+    SQLiteStorage.init_db("proj")
+
+    assert applied == [2, 3]
+    assert _user_version(db_path) == 3
+    with sqlite3.connect(db_path) as conn:
+        losses = [
+            row[0] for row in conn.execute("SELECT loss FROM metrics ORDER BY id")
+        ]
+    assert losses == [1.0, 0.5]
+
+
+def test_failed_schema_migration_keeps_last_completed_version(temp_dir, monkeypatch):
+    db_path = SQLiteStorage.init_db("proj")
+    _set_user_version(db_path, 1)
+
+    def create_kept(cursor):
+        cursor.execute("CREATE TABLE kept (id INTEGER)")
+
+    def create_then_fail(cursor):
+        cursor.execute("CREATE TABLE discarded (id INTEGER)")
+        raise RuntimeError("migration failed")
+
+    _register_migrations(monkeypatch, {2: create_kept, 3: create_then_fail})
+    with pytest.raises(RuntimeError, match="migration failed"):
+        SQLiteStorage.init_db("proj")
+
+    assert _user_version(db_path) == 2
+    with sqlite3.connect(db_path) as conn:
+        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master")}
+    assert "kept" in tables
+    assert "discarded" not in tables
+
+
+_TRACKIO_0_21_SCHEMA = """
+CREATE TABLE metrics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT NOT NULL,
+    run_name TEXT NOT NULL, step INTEGER NOT NULL, metrics TEXT NOT NULL
+);
+CREATE TABLE configs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, run_name TEXT NOT NULL,
+    config TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(run_name)
+);
+CREATE INDEX idx_metrics_run_step ON metrics(run_name, step);
+CREATE INDEX idx_configs_run_name ON configs(run_name);
+CREATE INDEX idx_metrics_run_timestamp ON metrics(run_name, timestamp);
+CREATE TABLE system_metrics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT NOT NULL,
+    run_name TEXT NOT NULL, metrics TEXT NOT NULL
+);
+CREATE INDEX idx_system_metrics_run_timestamp ON system_metrics(run_name, timestamp);
+CREATE TABLE project_metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE pending_uploads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, space_id TEXT NOT NULL, run_name TEXT,
+    step INTEGER, file_path TEXT NOT NULL, relative_path TEXT, created_at TEXT NOT NULL
+);
+CREATE TABLE alerts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT NOT NULL,
+    run_name TEXT NOT NULL, title TEXT NOT NULL, text TEXT,
+    level TEXT NOT NULL DEFAULT 'warn', step INTEGER, alert_id TEXT
+);
+CREATE INDEX idx_alerts_run ON alerts(run_name);
+CREATE INDEX idx_alerts_timestamp ON alerts(timestamp);
+CREATE UNIQUE INDEX idx_alerts_alert_id ON alerts(alert_id) WHERE alert_id IS NOT NULL;
+"""
+
+
+def _write_trackio_0_21_project(project):
+    db_path = SQLiteStorage.get_project_db_path(project)
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(_TRACKIO_0_21_SCHEMA)
+        for run, losses in (("run-a", [1.0, 0.5]), ("run-b", [0.9])):
+            conn.execute(
+                "INSERT INTO configs (run_name, config, created_at) VALUES (?, ?, ?)",
+                (run, orjson.dumps({"lr": 0.1, "run": run}).decode(), "2025-01-01"),
+            )
+            for step, loss in enumerate(losses):
+                conn.execute(
+                    "INSERT INTO metrics (timestamp, run_name, step, metrics) "
+                    "VALUES (?, ?, ?, ?)",
+                    (f"2025-01-01T00:00:0{step}", run, step, f'{{"loss": {loss}}}'),
+                )
+        conn.execute(
+            "INSERT INTO alerts (timestamp, run_name, title) VALUES (?, ?, ?)",
+            ("2025-01-01T00:00:09", "run-b", "plateau"),
+        )
+        conn.execute(
+            "INSERT INTO pending_uploads (space_id, run_name, file_path, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            ("u/s", "run-a", "a.png", "2025-01-01"),
+        )
+    return db_path
+
+
+def _schema_shape(db_path):
+    with sqlite3.connect(db_path) as conn:
+        tables = [
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+            )
+        ]
+        shape = {}
+        for table in tables:
+            columns = sorted(
+                tuple(row[1:]) for row in conn.execute(f"PRAGMA table_info({table})")
+            )
+            indexes = sorted(
+                (
+                    row[1],
+                    row[2],
+                    row[4],
+                    tuple(
+                        info[2]
+                        for info in conn.execute(f"PRAGMA index_info('{row[1]}')")
+                    ),
+                )
+                for row in conn.execute(f"PRAGMA index_list({table})")
+            )
+            shape[table] = (columns, indexes)
+        return shape
+
+
+def test_trackio_0_21_database_migrates_to_current_schema(temp_dir):
+    legacy_path = _write_trackio_0_21_project("legacy")
+    SQLiteStorage.init_db("legacy")
+    fresh_path = SQLiteStorage.init_db("fresh")
+
+    assert _user_version(legacy_path) == trackio.sqlite_storage.SCHEMA_VERSION
+    assert _schema_shape(legacy_path) == _schema_shape(fresh_path)
+
+
+def test_trackio_0_21_runs_get_one_id_shared_across_tables(temp_dir):
+    db_path = _write_trackio_0_21_project("legacy")
+    SQLiteStorage.init_db("legacy")
+
+    runs = SQLiteStorage.get_run_records("legacy")
+    ids = {run["name"]: run["id"] for run in runs}
+    assert sorted(ids) == ["run-a", "run-b"]
+    assert len(set(ids.values())) == 2
+    with sqlite3.connect(db_path) as conn:
+        for table in ("metrics", "configs", "alerts", "pending_uploads"):
+            pairs = set(conn.execute(f"SELECT run_name, run_id FROM {table}"))
+            assert pairs <= set(ids.items()), table
+
+    assert [log["loss"] for log in SQLiteStorage.get_logs("legacy", "run-a")] == [
+        1.0,
+        0.5,
+    ]
+    assert [a["title"] for a in SQLiteStorage.get_alerts("legacy")] == ["plateau"]
+    configs = SQLiteStorage.get_all_run_configs("legacy")
+    assert configs[ids["run-b"]]["lr"] == 0.1
+
+
+def test_query_project_reads_but_cannot_set_schema_version(temp_dir):
+    SQLiteStorage.init_db("proj")
+    result = SQLiteStorage.query_project("proj", "PRAGMA user_version")
+    assert result["rows"] == [{"user_version": trackio.sqlite_storage.SCHEMA_VERSION}]
+    with pytest.raises(Exception):
+        SQLiteStorage.query_project("proj", "PRAGMA user_version = 99")
+    assert (
+        _user_version(SQLiteStorage.get_project_db_path("proj"))
+        == trackio.sqlite_storage.SCHEMA_VERSION
+    )
+
+
 def test_log_and_get_metrics(temp_dir):
     metrics = {"acc": 0.9}
     SQLiteStorage.log(project="proj1", run="run1", metrics=metrics)
@@ -155,6 +352,50 @@ def test_dense_metric_survives_many_distinct_signatures(temp_dir):
 
     assert len(logs) <= 3000
     assert sum(1 for row in logs if "train/loss" in row) > 1000
+
+
+def test_spaces_logs_cache_invalidated_by_writes_without_mtime_change(
+    temp_dir, monkeypatch
+):
+    monkeypatch.setattr(trackio.sqlite_storage, "on_spaces", lambda: True)
+    monkeypatch.setenv("TRACKIO_DISABLE_LOGS_CACHE", "0")
+    project, run_id = "cache-proj", "run-1"
+    runs = [{"run": "run", "run_id": run_id}]
+
+    def logged_values():
+        single = SQLiteStorage.get_logs(
+            project, run_id=run_id, max_points=3000, scalar_only=True
+        )
+        batch = SQLiteStorage.get_logs_batch(
+            project, runs, max_points=3000, scalar_only=True
+        )[0]["logs"]
+        system = SQLiteStorage.get_system_logs(project, run_id=run_id)
+        system_batch = SQLiteStorage.get_system_logs_batch(project, runs)[0]["logs"]
+        return (
+            [row["step"] for row in single],
+            [row["step"] for row in batch],
+            [row["gpu"] for row in system],
+            [row["gpu"] for row in system_batch],
+        )
+
+    try:
+        SQLiteStorage.bulk_log(
+            project, "run", [{"reward": 0.1}], steps=[0], run_id=run_id
+        )
+        SQLiteStorage.bulk_log_system(project, "run", [{"gpu": 1}], run_id=run_id)
+        db_path = SQLiteStorage.get_project_db_path(project)
+        stat = db_path.stat()
+        assert logged_values() == ([0], [0], [1], [1])
+
+        SQLiteStorage.bulk_log(
+            project, "run", [{"reward": 0.2}], steps=[1], run_id=run_id
+        )
+        SQLiteStorage.bulk_log_system(project, "run", [{"gpu": 2}], run_id=run_id)
+        os.utime(db_path, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+
+        assert logged_values() == ([0, 1], [0, 1], [1, 2], [1, 2])
+    finally:
+        trackio.sqlite_storage._close_all_persistent_connections()
 
 
 def test_get_projects_and_runs(temp_dir):
@@ -664,3 +905,70 @@ def test_get_metric_values_max_points_keeps_ends_within_range(temp_dir):
         len(SQLiteStorage.get_metric_values(project, "run", "loss", max_points=None))
         == 1000
     )
+
+
+@pytest.mark.parametrize("use_index", [True, False])
+def test_run_records_preserve_metric_only_runs_and_first_timestamps(
+    temp_dir, use_index
+):
+    db_path = SQLiteStorage.init_db("records")
+    with sqlite3.connect(db_path) as conn:
+        conn.executemany(
+            "INSERT INTO metrics (run_id, run_name, timestamp, step, metrics) "
+            "VALUES (?, ?, ?, ?, '{}')",
+            [
+                ("b", "same name", "2026-01-03", 0),
+                ("a", "same name", "2026-01-02", 0),
+                ("a", "same name", "2026-01-01", 1),
+                ("a", "other name", "2026-01-04", 2),
+            ],
+        )
+        if not use_index:
+            conn.execute("DROP INDEX idx_metrics_run_record")
+    assert SQLiteStorage.get_run_records("records") == [
+        {"id": "a", "name": "same name", "created_at": "2026-01-01"},
+        {"id": "b", "name": "same name", "created_at": "2026-01-03"},
+        {"id": "a", "name": "other name", "created_at": "2026-01-04"},
+    ]
+
+
+def test_run_records_query_work_does_not_grow_with_metric_count(temp_dir, monkeypatch):
+    from contextlib import contextmanager
+
+    db_path = SQLiteStorage.init_db("records")
+    assert SQLiteStorage.get_run_records("records") == []
+    original_connection = SQLiteStorage._get_connection
+    instructions = 0
+
+    def progress():
+        nonlocal instructions
+        instructions += 1
+        return 0
+
+    @contextmanager
+    def measured_connection(*args, **kwargs):
+        with original_connection(*args, **kwargs) as conn:
+            conn.set_progress_handler(progress, 1)
+            try:
+                yield conn
+            finally:
+                conn.set_progress_handler(None, 0)
+
+    monkeypatch.setattr(SQLiteStorage, "_get_connection", measured_connection)
+
+    def add_metrics(start, stop):
+        with sqlite3.connect(db_path) as conn:
+            conn.executemany(
+                "INSERT INTO metrics (run_id, run_name, timestamp, step, metrics) "
+                "VALUES ('run-id', 'no-config', '2026-01-01', ?, '{}')",
+                ((step,) for step in range(start, stop)),
+            )
+
+    add_metrics(0, 100)
+    expected = SQLiteStorage.get_run_records("records")
+    small_query_work = instructions
+    add_metrics(100, 20000)
+    instructions = 0
+    assert SQLiteStorage.get_run_records("records") == expected
+    # Count SQLite VM instructions rather than using a noisy wall-clock budget.
+    assert instructions < small_query_work * 3

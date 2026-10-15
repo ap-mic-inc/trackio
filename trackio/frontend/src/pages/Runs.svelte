@@ -3,7 +3,7 @@
   import Quickstart from "../components/Quickstart.svelte";
   import { overviewGuide } from "../lib/quickstarts.js";
   import CodeSnippet from "../components/CodeSnippet.svelte";
-  import { tick } from "svelte";
+  import { tick, untrack } from "svelte";
   import LoadingTrackio from "../components/LoadingTrackio.svelte";
   import {
     getProjectSummary,
@@ -24,7 +24,15 @@
     runMutationAllowed = true,
   } = $props();
 
-  let canMutateRuns = $derived(runMutationAllowed);
+  let deleting = $state(false);
+  let deleteError = $state("");
+  let selectedKeys = $state([]);
+  let selectionProject = $state(null);
+  let canMutateRuns = $derived(runMutationAllowed && !deleting);
+
+  function selectionKey(run) {
+    return run.id != null ? `id:${run.id}` : `name:${run.name}`;
+  }
 
   let runColorMap = $derived(buildColorMap(runs));
 
@@ -39,6 +47,22 @@
     const matches = new Set(filterMetricsByRegex(runsData.map((r) => r.name), filterText));
     return runsData.filter((r) => matches.has(r.name));
   });
+
+  let selectedVisibleRuns = $derived(
+    selectionProject === project
+      ? filteredRuns.filter((run) => selectedKeys.includes(selectionKey(run)))
+      : [],
+  );
+  let allVisibleSelected = $derived(
+    filteredRuns.length > 0 && selectedVisibleRuns.length === filteredRuns.length,
+  );
+
+  function toggleSelection(run) {
+    const key = selectionKey(run);
+    selectedKeys = selectedKeys.includes(key)
+      ? selectedKeys.filter((item) => item !== key)
+      : [...selectedKeys, key];
+  }
 
   let hasArtifacts = $derived(
     runsData.some((r) => r.outputs > 0 || r.inputs > 0),
@@ -110,20 +134,39 @@
   }
 
   $effect(() => {
-    project;
-    loadRuns();
+    selectionProject = project;
+    selectedKeys = [];
+    deleteError = "";
+    untrack(loadRuns);
   });
 
-  async function handleDelete(run) {
-    if (!canMutateRuns) return;
-    if (!confirm(`Delete run "${run.name}"? This cannot be undone.`)) return;
-    try {
-      await deleteRun(project, run);
+  async function handleDelete(targets) {
+    if (!canMutateRuns || targets.length === 0) return;
+    const targetProject = project;
+    const message = targets.length === 1
+      ? `Delete run "${targets[0].name}"? This cannot be undone.`
+      : `Delete ${targets.length} selected runs? This cannot be undone.`;
+    if (!confirm(message)) return;
+    deleting = true;
+    deleteError = "";
+    renamingIndex = -1;
+    const failed = [];
+    for (const run of targets) {
+      try {
+        if (!(await deleteRun(targetProject, run))) failed.push(run);
+      } catch {
+        failed.push(run);
+      }
+    }
+    if (project === targetProject) {
+      selectedKeys = failed.map(selectionKey);
+      if (failed.length) {
+        deleteError = `Could not delete ${failed.length} of ${targets.length} runs. Refresh and try again.`;
+      }
       await loadRuns();
       if (onRunsChanged) onRunsChanged();
-    } catch (e) {
-      console.error("Failed to delete run:", e);
     }
+    deleting = false;
   }
 
   async function startRename(index, currentName) {
@@ -163,6 +206,9 @@
   {#if project}
     <Quickstart guide={overviewGuide(project)} />
   {/if}
+  {#if deleteError}
+    <p role="alert" class="delete-error">{deleteError}</p>
+  {/if}
   {#if loading}
     <LoadingTrackio />
   {:else if runsData.length === 0}
@@ -180,10 +226,30 @@
         <span class="filter-count">{filteredRuns.length} of {runsData.length} runs</span>
       </div>
     {/if}
+    <div class="bulk-actions">
+      <span>{selectedVisibleRuns.length} selected</span>
+      <button
+        class="bulk-delete"
+        disabled={!canMutateRuns || selectedVisibleRuns.length === 0}
+        onclick={() => handleDelete([...selectedVisibleRuns])}
+      >{deleting ? "Deleting…" : `Delete selected (${selectedVisibleRuns.length})`}</button>
+    </div>
     <div class="runs-table-wrap">
     <table class="runs-table">
       <thead>
         <tr>
+          <th class="selection-cell">
+            <input
+              type="checkbox"
+              aria-label="Select all visible runs"
+              checked={allVisibleSelected}
+              indeterminate={selectedVisibleRuns.length > 0 && !allVisibleSelected}
+              disabled={!canMutateRuns || filteredRuns.length === 0}
+              onchange={() => {
+                selectedKeys = allVisibleSelected ? [] : filteredRuns.map(selectionKey);
+              }}
+            />
+          </th>
           <th>Run Name</th>
           <th>Steps</th>
           <th>Last Step</th>
@@ -196,6 +262,15 @@
       <tbody>
         {#each filteredRuns as run, i}
           <tr>
+            <td class="selection-cell">
+              <input
+                type="checkbox"
+                aria-label={`Select run ${run.name}`}
+                checked={selectedVisibleRuns.includes(run)}
+                disabled={!canMutateRuns}
+                onchange={() => toggleSelection(run)}
+              />
+            </td>
             <td class="run-name-cell">
               {#if renamingIndex === i}
                 <input
@@ -263,7 +338,7 @@
                 class="action-btn delete-btn"
                 title={canMutateRuns ? "Delete" : "Sign in with Hugging Face (write access) to delete runs"}
                 disabled={!canMutateRuns}
-                onclick={() => handleDelete(run)}
+                onclick={() => handleDelete([run])}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <polyline points="3 6 5 6 21 6"/>
@@ -290,6 +365,32 @@
   .runs-table-wrap { overflow-x: auto; border: 1px solid var(--border-color-primary, #e5e7eb); border-radius: var(--radius-xl, 10px); box-shadow: var(--shadow-drop, 0 1px 2px rgba(0, 0, 0, 0.05)); }
   .no-matches { padding: 24px; text-align: center; color: var(--body-text-color-subdued, #6b7280); font-size: 13px; }
 
+  .bulk-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+    font-size: var(--text-md, 14px);
+    color: var(--body-text-color, #1f2937);
+  }
+  .bulk-delete {
+    border: 1px solid var(--border-color-primary, #e5e7eb);
+    border-radius: var(--radius-sm, 4px);
+    padding: 6px 10px;
+    background: var(--background-fill-secondary, #f9fafb);
+    color: var(--body-text-color, #1f2937);
+    cursor: pointer;
+  }
+  .bulk-delete:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .delete-error {
+    color: #dc2626;
+  }
+  .selection-cell {
+    width: 28px;
+  }
   .runs-page {
     min-width: 0;
     box-sizing: border-box;

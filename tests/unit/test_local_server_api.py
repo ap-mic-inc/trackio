@@ -708,3 +708,29 @@ def test_dismiss_alerts_migrates_legacy_table(temp_dir):
     assert alert["dismissed_at"] is None
     assert SQLiteStorage.dismiss_alerts(project, ids=[alert["id"]]) == 1
     assert SQLiteStorage.get_alerts(project)[0]["dismissed_at"] is not None
+
+
+def test_paused_writes_are_rejected_as_unavailable_while_reads_work(
+    temp_dir, monkeypatch
+):
+    monkeypatch.setenv(trackio_utils.PAUSE_WRITES_VARIABLE, "1")
+    app, url, _, _ = trackio.show(block_thread=False, open_browser=False)
+    base = url.rstrip("/")
+    try:
+        response = httpx.post(
+            f"{base}/api/bulk_log",
+            json={
+                "logs": [{"project": "p", "run": "r", "metrics": {"loss": 1.0}}],
+                "hf_token": None,
+            },
+            headers={"x-trackio-write-token": app.write_token},
+            timeout=5,
+        )
+        assert response.status_code == 503
+        assert httpx.post(
+            f"{base}/api/get_all_projects", json={}, timeout=5
+        ).json() == {"data": []}
+        assert httpx.get(f"{base}/version", timeout=5).json()["writes_paused"] is True
+        assert SQLiteStorage.get_projects() == []
+    finally:
+        app.close()

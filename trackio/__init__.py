@@ -15,6 +15,17 @@ from huggingface_hub import SpaceStorage
 from huggingface_hub.errors import LocalTokenNotFoundError
 
 from trackio import context_vars, dataset_tracking, deploy, device_info, utils
+from trackio._unsupported import (
+    ArtifactTTL,
+    Classes,
+    Config,
+    EvalTable,
+    Graph,
+    JoinedTable,
+    Molecule,
+    Plotly,
+    Settings,
+)
 from trackio.alerts import AlertLevel
 from trackio.api import Api
 from trackio.apple_gpu import apple_gpu_available
@@ -85,6 +96,15 @@ __all__ = [
     "import_tf_events",
     "save",
     "Artifact",
+    "ArtifactTTL",
+    "Classes",
+    "Config",
+    "EvalTable",
+    "Graph",
+    "JoinedTable",
+    "Molecule",
+    "Plotly",
+    "Settings",
     "ReferenceHandler",
     "ResolvedReference",
     "register_reference_handler",
@@ -155,6 +175,19 @@ def _safe_get_runs_for_init(
             f"trackio.init() could not inspect existing runs for project '{project}': {e}. Continuing without resume metadata."
         )
         return []
+
+
+def _migrate_local_project_for_init(project: str) -> None:
+    if utils.get_storage_mode() == "jsonl":
+        return
+    if not SQLiteStorage.get_project_db_path(project).exists():
+        return
+    try:
+        SQLiteStorage.init_db(project)
+    except Exception as e:
+        _emit_nonfatal_warning(
+            f"trackio.init() could not migrate the local database for project '{project}': {e}."
+        )
 
 
 def _safe_get_latest_run_for_init(
@@ -552,6 +585,7 @@ def init(
                 f"trackio.init() could not create a remote client for '{server_base_url}': {e}. Continuing with local fallback metadata lookups."
             )
 
+    _migrate_local_project_for_init(project)
     existing_run_records = _safe_get_runs_for_init(
         project,
         space_id,
